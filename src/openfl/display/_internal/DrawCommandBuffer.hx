@@ -83,40 +83,40 @@ class DrawCommandBuffer
 			{
 				case BEGIN_BITMAP_FILL:
 					var c = data.readBeginBitmapFill();
-					beginBitmapFill(c.bitmap, c.matrix, c.repeat, c.smooth);
+					beginBitmapFill(c.bitmap, c.matrix, c.repeat, c.smooth, c.zIndex);
 				case BEGIN_FILL:
 					var c = data.readBeginFill();
-					beginFill(c.color, c.alpha);
+					beginFill(c.color, c.alpha, c.zIndex);
 				case BEGIN_GRADIENT_FILL:
 					var c = data.readBeginGradientFill();
-					beginGradientFill(c.type, c.colors, c.alphas, c.ratios, c.matrix, c.spreadMethod, c.interpolationMethod, c.focalPointRatio);
+					beginGradientFill(c.type, c.colors, c.alphas, c.ratios, c.matrix, c.spreadMethod, c.interpolationMethod, c.focalPointRatio, c.zIndex);
 				case BEGIN_SHADER_FILL:
 					var c = data.readBeginShaderFill();
-					beginShaderFill(c.shaderBuffer);
+					beginShaderFill(c.shaderBuffer, c.zIndex);
 				case CUBIC_CURVE_TO:
 					var c = data.readCubicCurveTo();
-					cubicCurveTo(c.controlX1, c.controlY1, c.controlX2, c.controlY2, c.anchorX, c.anchorY);
+					cubicCurveTo(c.controlX1, c.controlY1, c.controlX2, c.controlY2, c.anchorX, c.anchorY, c.zIndex);
 				case CURVE_TO:
 					var c = data.readCurveTo();
-					curveTo(c.controlX, c.controlY, c.anchorX, c.anchorY);
+					curveTo(c.controlX, c.controlY, c.anchorX, c.anchorY, c.zIndex);
 				case DRAW_CIRCLE:
 					var c = data.readDrawCircle();
-					drawCircle(c.x, c.y, c.radius);
+					drawCircle(c.x, c.y, c.radius, c.zIndex);
 				case DRAW_ELLIPSE:
 					var c = data.readDrawEllipse();
-					drawEllipse(c.x, c.y, c.width, c.height);
+					drawEllipse(c.x, c.y, c.width, c.height, c.zIndex);
 				case DRAW_QUADS:
 					var c = data.readDrawQuads();
-					drawQuads(c.rects, c.indices, c.transforms);
+					drawQuads(c.rects, c.indices, c.transforms, c.zIndex);
 				case DRAW_RECT:
 					var c = data.readDrawRect();
-					drawRect(c.x, c.y, c.width, c.height);
+					drawRect(c.x, c.y, c.width, c.height, c.zIndex);
 				case DRAW_ROUND_RECT:
 					var c = data.readDrawRoundRect();
-					drawRoundRect(c.x, c.y, c.width, c.height, c.ellipseWidth, c.ellipseHeight);
+					drawRoundRect(c.x, c.y, c.width, c.height, c.ellipseWidth, c.ellipseHeight, c.zIndex);
 				case DRAW_TRIANGLES:
 					var c = data.readDrawTriangles();
-					drawTriangles(c.vertices, c.indices, c.uvtData, c.culling);
+					drawTriangles(c.vertices, c.indices, c.uvtData, c.culling, c.zIndex);
 				case END_FILL:
 					var c = data.readEndFill();
 					endFill();
@@ -152,28 +152,30 @@ class DrawCommandBuffer
 		return other;
 	}
 
-	public function beginBitmapFill(bitmap:BitmapData, matrix:Matrix, repeat:Bool, smooth:Bool):Void
+	public function beginBitmapFill(bitmap:BitmapData, matrix:Matrix, repeat:Bool, smooth:Bool, zIndex:Float = 0):Void
 	{
-		prepareWrite(COW_TYPES | COW_O | COW_B);
+		prepareWrite(COW_TYPES | COW_O | COW_B | COW_F);
 
 		types.push(BEGIN_BITMAP_FILL);
 		o.push(bitmap);
 		o.push(matrix);
 		b.push(repeat);
 		b.push(smooth);
+		f.push(zIndex);
 	}
 
-	public function beginFill(color:Int, alpha:Float):Void
+	public function beginFill(color:Int, alpha:Float, zIndex:Float = 0):Void
 	{
 		prepareWrite(COW_TYPES | COW_I | COW_F);
 
 		types.push(BEGIN_FILL);
 		i.push(color);
 		f.push(alpha);
+		f.push(zIndex);
 	}
 
 	public function beginGradientFill(type:GradientType, colors:Array<Int>, alphas:Array<Float>, ratios:Array<Int>, matrix:Matrix, spreadMethod:SpreadMethod,
-			interpolationMethod:InterpolationMethod, focalPointRatio:Float):Void
+			interpolationMethod:InterpolationMethod, focalPointRatio:Float, zIndex:Float = 0):Void
 	{
 		prepareWrite(COW_TYPES | COW_O | COW_II | COW_FF | COW_F);
 
@@ -186,14 +188,16 @@ class DrawCommandBuffer
 		o.push(spreadMethod);
 		o.push(interpolationMethod);
 		f.push(focalPointRatio);
+		f.push(zIndex);
 	}
 
-	public function beginShaderFill(shaderBuffer:ShaderBuffer):Void
+	public function beginShaderFill(shaderBuffer:ShaderBuffer, zIndex:Float = 0):Void
 	{
-		prepareWrite(COW_TYPES | COW_O);
+		prepareWrite(COW_TYPES | COW_O | COW_F);
 
 		types.push(BEGIN_SHADER_FILL);
 		o.push(shaderBuffer);
+		f.push(zIndex);
 	}
 
 	public function clear():Void
@@ -203,25 +207,32 @@ class DrawCommandBuffer
 		// fewer temporary objects that need to be garbage collected
 
 		if ((copyOnWrite & COW_TYPES) == 0) types.resize(0);
-		else types = empty.types;
+		else
+			types = empty.types;
 
 		if ((copyOnWrite & COW_B) == 0) b.resize(0);
-		else b = empty.b;
+		else
+			b = empty.b;
 
 		if ((copyOnWrite & COW_I) == 0) i.resize(0);
-		else i = empty.i;
+		else
+			i = empty.i;
 
 		if ((copyOnWrite & COW_F) == 0) f.resize(0);
-		else f = empty.f;
+		else
+			f = empty.f;
 
 		if ((copyOnWrite & COW_O) == 0) o.resize(0);
-		else o = empty.o;
+		else
+			o = empty.o;
 
 		if ((copyOnWrite & COW_FF) == 0) ff.resize(0);
-		else ff = empty.ff;
+		else
+			ff = empty.ff;
 
 		if ((copyOnWrite & COW_II) == 0) ii.resize(0);
-		else ii = empty.ii;
+		else
+			ii = empty.ii;
 	}
 
 	public function copy():DrawCommandBuffer
@@ -231,7 +242,7 @@ class DrawCommandBuffer
 		return copy;
 	}
 
-	public function cubicCurveTo(controlX1:Float, controlY1:Float, controlX2:Float, controlY2:Float, anchorX:Float, anchorY:Float):Void
+	public function cubicCurveTo(controlX1:Float, controlY1:Float, controlX2:Float, controlY2:Float, anchorX:Float, anchorY:Float, zIndex:Float = 0):Void
 	{
 		prepareWrite(COW_TYPES | COW_F);
 
@@ -242,9 +253,10 @@ class DrawCommandBuffer
 		f.push(controlY2);
 		f.push(anchorX);
 		f.push(anchorY);
+		f.push(zIndex);
 	}
 
-	public function curveTo(controlX:Float, controlY:Float, anchorX:Float, anchorY:Float):Void
+	public function curveTo(controlX:Float, controlY:Float, anchorX:Float, anchorY:Float, zIndex:Float = 0):Void
 	{
 		prepareWrite(COW_TYPES | COW_F);
 
@@ -253,6 +265,7 @@ class DrawCommandBuffer
 		f.push(controlY);
 		f.push(anchorX);
 		f.push(anchorY);
+		f.push(zIndex);
 	}
 
 	public function destroy():Void
@@ -269,7 +282,7 @@ class DrawCommandBuffer
 		ii = null;
 	}
 
-	public function drawCircle(x:Float, y:Float, radius:Float):Void
+	public function drawCircle(x:Float, y:Float, radius:Float, zIndex:Float = 0):Void
 	{
 		prepareWrite(COW_TYPES | COW_F);
 
@@ -277,9 +290,10 @@ class DrawCommandBuffer
 		f.push(x);
 		f.push(y);
 		f.push(radius);
+		f.push(zIndex);
 	}
 
-	public function drawEllipse(x:Float, y:Float, width:Float, height:Float):Void
+	public function drawEllipse(x:Float, y:Float, width:Float, height:Float, zIndex:Float = 0):Void
 	{
 		prepareWrite(COW_TYPES | COW_F);
 
@@ -288,19 +302,21 @@ class DrawCommandBuffer
 		f.push(y);
 		f.push(width);
 		f.push(height);
+		f.push(zIndex);
 	}
 
-	public function drawQuads(rects:Vector<Float>, indices:Vector<Int>, transforms:Vector<Float>):Void
+	public function drawQuads(rects:Vector<Float>, indices:Vector<Int>, transforms:Vector<Float>, zIndex:Float = 0):Void
 	{
-		prepareWrite(COW_TYPES | COW_O);
+		prepareWrite(COW_TYPES | COW_O | COW_F);
 
 		types.push(DRAW_QUADS);
 		o.push(rects);
 		o.push(indices);
 		o.push(transforms);
+		f.push(zIndex);
 	}
 
-	public function drawRect(x:Float, y:Float, width:Float, height:Float):Void
+	public function drawRect(x:Float, y:Float, width:Float, height:Float, zIndex:Float = 0):Void
 	{
 		prepareWrite(COW_TYPES | COW_F);
 
@@ -309,9 +325,10 @@ class DrawCommandBuffer
 		f.push(y);
 		f.push(width);
 		f.push(height);
+		f.push(zIndex);
 	}
 
-	public function drawRoundRect(x:Float, y:Float, width:Float, height:Float, ellipseWidth:Float, ellipseHeight:Null<Float>):Void
+	public function drawRoundRect(x:Float, y:Float, width:Float, height:Float, ellipseWidth:Float, ellipseHeight:Null<Float>, zIndex:Float = 0):Void
 	{
 		prepareWrite(COW_TYPES | COW_F | COW_O);
 
@@ -322,17 +339,19 @@ class DrawCommandBuffer
 		f.push(height);
 		f.push(ellipseWidth);
 		o.push(ellipseHeight);
+		f.push(zIndex);
 	}
 
-	public function drawTriangles(vertices:Vector<Float>, indices:Vector<Int>, uvtData:Vector<Float>, culling:TriangleCulling):Void
+	public function drawTriangles(vertices:Vector<Float>, indices:Vector<Int>, uvtData:Vector<Float>, culling:TriangleCulling, zIndex:Float = 0):Void
 	{
-		prepareWrite(COW_TYPES | COW_O);
+		prepareWrite(COW_TYPES | COW_O | COW_F);
 
 		types.push(DRAW_TRIANGLES);
 		o.push(vertices);
 		o.push(indices);
 		o.push(uvtData);
 		o.push(culling);
+		f.push(zIndex);
 	}
 
 	public function endFill():Void

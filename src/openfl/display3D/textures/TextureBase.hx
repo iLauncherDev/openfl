@@ -158,28 +158,11 @@ class TextureBase extends EventDispatcher
 		{
 			__context.__bindGLFramebuffer(__glFramebuffer);
 
-			if (Context3D.__glDepthStencil != 0)
-			{
-				__glDepthRenderbuffer = gl.createRenderbuffer();
-				__glStencilRenderbuffer = __glDepthRenderbuffer;
+			__glDepthRenderbuffer = gl.createRenderbuffer();
 
-				gl.bindRenderbuffer(gl.RENDERBUFFER, __glDepthRenderbuffer);
-				gl.renderbufferStorage(gl.RENDERBUFFER, Context3D.__glDepthStencil, __width, __height);
-				gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, gl.RENDERBUFFER, __glDepthRenderbuffer);
-			}
-			else
-			{
-				__glDepthRenderbuffer = gl.createRenderbuffer();
-				__glStencilRenderbuffer = gl.createRenderbuffer();
-
-				gl.bindRenderbuffer(gl.RENDERBUFFER, __glDepthRenderbuffer);
-				gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, __width, __height);
-				gl.bindRenderbuffer(gl.RENDERBUFFER, __glStencilRenderbuffer);
-				gl.renderbufferStorage(gl.RENDERBUFFER, gl.STENCIL_INDEX8, __width, __height);
-
-				gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, __glDepthRenderbuffer);
-				gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.STENCIL_ATTACHMENT, gl.RENDERBUFFER, __glStencilRenderbuffer);
-			}
+			gl.bindRenderbuffer(gl.RENDERBUFFER, __glDepthRenderbuffer);
+			gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, __width, __height);
+			gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, __glDepthRenderbuffer);
 
 			if (__context.__enableErrorChecking)
 			{

@@ -4,12 +4,16 @@ import lime.math.ARGB;
 import lime.utils.Float32Array;
 import lime.utils.UInt16Array;
 import openfl.display.BitmapData;
+import openfl.display.BlendMode;
 import openfl.display.Graphics;
 import openfl.display.MovieClip;
 import openfl.display.OpenGLRenderer;
+import openfl.display3D.Context3DCompareMode;
 import openfl.display._internal.CairoGraphics;
 import openfl.display._internal.CanvasGraphics;
+import openfl.display._internal.DrawCommandBuffer;
 import openfl.display._internal.DrawCommandReader;
+import openfl.display._internal.DrawCommandType;
 import openfl.geom.ColorTransform;
 import openfl.geom.Matrix;
 import openfl.geom.Rectangle;
@@ -44,10 +48,473 @@ class Context3DGraphics
 	@:noCompletion private static var tempScale9VerticesVector:Vector<Float>;
 	@:noCompletion private static var renderOrHitTestReader:DrawCommandReader = new DrawCommandReader(null);
 	@:noCompletion private static var buildBufferReader:DrawCommandReader = new DrawCommandReader(null);
+	@:noCompletion private static var reverseDrawGroupsReader:DrawCommandReader = new DrawCommandReader(null);
+	@:noCompletion private static var drawCommandBufferPool:Array<DrawCommandBuffer> = [];
 	@:noCompletion private static var tempLinePathVertices:Vector<Float> = new Vector<Float>();
 	@:noCompletion private static var tempLinePathReducedVertices:Vector<Float> = new Vector<Float>();
 
-	@:noCompletion private static function buildBuffer(graphics:Graphics, renderer:OpenGLRenderer):Void
+	@:noCompletion private static function getPooledDrawCommandBuffer():DrawCommandBuffer
+	{
+		return drawCommandBufferPool.length > 0 ? drawCommandBufferPool.pop() : new DrawCommandBuffer();
+	}
+
+	@:noCompletion private static function releaseDrawCommandBuffer(buffer:DrawCommandBuffer):Void
+	{
+		if (buffer == null) return;
+
+		buffer.clear();
+		drawCommandBufferPool.push(buffer);
+	}
+
+	@:noCompletion
+	private static function cloneDrawCommandBuffer(commands:DrawCommandBuffer):DrawCommandBuffer
+	{
+		var data = reverseDrawGroupsReader;
+		data.reset();
+		data.buffer = commands;
+
+		var valid = true;
+		var result = getPooledDrawCommandBuffer();
+
+		var zIndex = 0;
+
+		function copyCommand(command:DrawCommandBuffer, type:DrawCommandType):Bool
+		{
+			switch (type)
+			{
+				case BEGIN_BITMAP_FILL:
+					var c = data.readBeginBitmapFill();
+					command.beginBitmapFill(c.bitmap, c.matrix, c.repeat, c.smooth, zIndex++);
+
+				case BEGIN_FILL:
+					var c = data.readBeginFill();
+					command.beginFill(c.color, c.alpha, zIndex++);
+
+				case BEGIN_GRADIENT_FILL:
+					var c = data.readBeginGradientFill();
+					command.beginGradientFill(c.type, c.colors, c.alphas, c.ratios, c.matrix, c.spreadMethod, c.interpolationMethod, c.focalPointRatio,
+						zIndex++);
+
+				case BEGIN_SHADER_FILL:
+					var c = data.readBeginShaderFill();
+					command.beginShaderFill(c.shaderBuffer, zIndex++);
+
+				case CUBIC_CURVE_TO:
+					var c = data.readCubicCurveTo();
+					command.cubicCurveTo(c.controlX1, c.controlY1, c.controlX2, c.controlY2, c.anchorX, c.anchorY, zIndex++);
+
+				case CURVE_TO:
+					var c = data.readCurveTo();
+					command.curveTo(c.controlX, c.controlY, c.anchorX, c.anchorY, zIndex++);
+
+				case DRAW_CIRCLE:
+					var c = data.readDrawCircle();
+					command.drawCircle(c.x, c.y, c.radius, zIndex++);
+
+				case DRAW_ELLIPSE:
+					var c = data.readDrawEllipse();
+					command.drawEllipse(c.x, c.y, c.width, c.height, zIndex++);
+
+				case DRAW_QUADS:
+					var c = data.readDrawQuads();
+					command.drawQuads(c.rects, c.indices, c.transforms, zIndex++);
+
+				case DRAW_RECT:
+					var c = data.readDrawRect();
+					command.drawRect(c.x, c.y, c.width, c.height, zIndex++);
+
+				case DRAW_ROUND_RECT:
+					var c = data.readDrawRoundRect();
+					command.drawRoundRect(c.x, c.y, c.width, c.height, c.ellipseWidth, c.ellipseHeight, zIndex++);
+
+				case DRAW_TRIANGLES:
+					var c = data.readDrawTriangles();
+					command.drawTriangles(c.vertices, c.indices, c.uvtData, c.culling, zIndex++);
+
+				case LINE_STYLE:
+					var c = data.readLineStyle();
+					command.lineStyle(c.thickness, c.color, c.alpha, c.pixelHinting, c.scaleMode, c.caps, c.joints, c.miterLimit);
+
+				case END_FILL:
+					data.skip(type);
+					command.endFill();
+
+				case LINE_BITMAP_STYLE:
+					var c = data.readLineBitmapStyle();
+					command.lineBitmapStyle(c.bitmap, c.matrix, c.repeat, c.smooth);
+
+				case LINE_GRADIENT_STYLE:
+					var c = data.readLineGradientStyle();
+					command.lineGradientStyle(c.type, c.colors, c.alphas, c.ratios, c.matrix, c.spreadMethod, c.interpolationMethod, c.focalPointRatio);
+
+				case LINE_TO:
+					var c = data.readLineTo();
+					command.lineTo(c.x, c.y);
+
+				case MOVE_TO:
+					var c = data.readMoveTo();
+					command.moveTo(c.x, c.y);
+
+				case OVERRIDE_BLEND_MODE:
+					var c = data.readOverrideBlendMode();
+					command.overrideBlendMode(c.blendMode);
+
+				case OVERRIDE_MATRIX:
+					var c = data.readOverrideMatrix();
+					command.overrideMatrix(c.matrix);
+
+				case WINDING_EVEN_ODD:
+					data.readWindingEvenOdd();
+					command.windingEvenOdd();
+
+				case WINDING_NON_ZERO:
+					data.readWindingNonZero();
+					command.windingNonZero();
+
+				default:
+					trace("Unknown DrawCommandType: " + type);
+					return false;
+			}
+
+			return true;
+		}
+
+		for (type in commands.types)
+		{
+			if (!copyCommand(result, type))
+			{
+				valid = false;
+				break;
+			}
+		}
+
+		if (!valid)
+		{
+			releaseDrawCommandBuffer(result);
+			result = null;
+		}
+
+		return result;
+	}
+
+	@:noCompletion
+	private static function buildReversedDrawGroups(commands:DrawCommandBuffer, initialBlendMode:BlendMode):DrawCommandBuffer
+	{
+		if (commands == null) return null;
+
+		var data = reverseDrawGroupsReader;
+		data.reset();
+		data.buffer = commands;
+
+		var result = getPooledDrawCommandBuffer();
+
+		var drawGroups:Array<DrawCommandBuffer> = [];
+		var groupBlendModes:Array<BlendMode> = [];
+
+		var currentFill:DrawCommandBuffer = null;
+		var currentLineStyle:DrawCommandBuffer = null;
+		var currentGroup:DrawCommandBuffer = null;
+		var currentBlendMode = initialBlendMode;
+		var currentGroupBlendMode = initialBlendMode;
+
+		var valid = true;
+		var hasDrawing = false;
+
+		function copyCommand(command:DrawCommandBuffer, type:DrawCommandType):Bool
+		{
+			switch (type)
+			{
+				case BEGIN_BITMAP_FILL:
+					var c = data.readBeginBitmapFill();
+					command.beginBitmapFill(c.bitmap, c.matrix, c.repeat, c.smooth, c.zIndex);
+
+				case BEGIN_FILL:
+					var c = data.readBeginFill();
+					command.beginFill(c.color, c.alpha, c.zIndex);
+
+				case BEGIN_GRADIENT_FILL:
+					var c = data.readBeginGradientFill();
+					command.beginGradientFill(c.type, c.colors, c.alphas, c.ratios, c.matrix, c.spreadMethod, c.interpolationMethod, c.focalPointRatio,
+						c.zIndex);
+
+				case BEGIN_SHADER_FILL:
+					var c = data.readBeginShaderFill();
+					command.beginShaderFill(c.shaderBuffer, c.zIndex);
+
+				case CUBIC_CURVE_TO:
+					var c = data.readCubicCurveTo();
+					command.cubicCurveTo(c.controlX1, c.controlY1, c.controlX2, c.controlY2, c.anchorX, c.anchorY);
+
+				case CURVE_TO:
+					var c = data.readCurveTo();
+					command.curveTo(c.controlX, c.controlY, c.anchorX, c.anchorY);
+
+				case DRAW_CIRCLE:
+					var c = data.readDrawCircle();
+					command.drawCircle(c.x, c.y, c.radius, c.zIndex);
+
+				case DRAW_ELLIPSE:
+					var c = data.readDrawEllipse();
+					command.drawEllipse(c.x, c.y, c.width, c.height, c.zIndex);
+
+				case DRAW_QUADS:
+					var c = data.readDrawQuads();
+					command.drawQuads(c.rects, c.indices, c.transforms, c.zIndex);
+
+				case DRAW_RECT:
+					var c = data.readDrawRect();
+					command.drawRect(c.x, c.y, c.width, c.height, c.zIndex);
+
+				case DRAW_ROUND_RECT:
+					var c = data.readDrawRoundRect();
+					command.drawRoundRect(c.x, c.y, c.width, c.height, c.ellipseWidth, c.ellipseHeight, c.zIndex);
+
+				case DRAW_TRIANGLES:
+					var c = data.readDrawTriangles();
+					command.drawTriangles(c.vertices, c.indices, c.uvtData, c.culling, c.zIndex);
+
+				case LINE_STYLE:
+					var c = data.readLineStyle();
+					command.lineStyle(c.thickness, c.color, c.alpha, c.pixelHinting, c.scaleMode, c.caps, c.joints, c.miterLimit);
+
+				case END_FILL:
+					data.skip(type);
+					command.endFill();
+
+				case LINE_BITMAP_STYLE:
+					var c = data.readLineBitmapStyle();
+					command.lineBitmapStyle(c.bitmap, c.matrix, c.repeat, c.smooth);
+
+				case LINE_GRADIENT_STYLE:
+					var c = data.readLineGradientStyle();
+					command.lineGradientStyle(c.type, c.colors, c.alphas, c.ratios, c.matrix, c.spreadMethod, c.interpolationMethod, c.focalPointRatio);
+
+				case LINE_TO:
+					var c = data.readLineTo();
+					command.lineTo(c.x, c.y);
+
+				case MOVE_TO:
+					var c = data.readMoveTo();
+					command.moveTo(c.x, c.y);
+
+				case OVERRIDE_BLEND_MODE:
+					var c = data.readOverrideBlendMode();
+					command.overrideBlendMode(c.blendMode);
+
+				case OVERRIDE_MATRIX:
+					var c = data.readOverrideMatrix();
+					command.overrideMatrix(c.matrix);
+
+				case WINDING_EVEN_ODD:
+					data.readWindingEvenOdd();
+					command.windingEvenOdd();
+
+				case WINDING_NON_ZERO:
+					data.readWindingNonZero();
+					command.windingNonZero();
+
+				default:
+					trace("Unknown DrawCommandType: " + type);
+					return false;
+			}
+
+			return true;
+		}
+
+		function flushGroup():Void
+		{
+			if (currentGroup != null)
+			{
+				drawGroups.push(currentGroup);
+				groupBlendModes.push(currentGroupBlendMode);
+				currentGroup = null;
+			}
+
+			hasDrawing = false;
+		}
+
+		function startGroup():Void
+		{
+			if (currentGroup == null && currentFill != null)
+			{
+				currentGroup = getPooledDrawCommandBuffer();
+				currentGroup.append(currentFill);
+				if (currentLineStyle != null) currentGroup.append(currentLineStyle);
+				currentGroupBlendMode = currentBlendMode;
+			}
+		}
+
+		for (type in commands.types)
+		{
+			switch (type)
+			{
+				case BEGIN_BITMAP_FILL, BEGIN_FILL, BEGIN_GRADIENT_FILL, BEGIN_SHADER_FILL:
+					if (currentFill != null)
+					{
+						valid = false;
+						break;
+					}
+
+					currentFill = getPooledDrawCommandBuffer();
+
+					if (!copyCommand(currentFill, type))
+					{
+						valid = false;
+						break;
+					}
+
+					startGroup();
+
+				case CUBIC_CURVE_TO, CURVE_TO, DRAW_CIRCLE, DRAW_ELLIPSE, DRAW_QUADS, DRAW_RECT, DRAW_ROUND_RECT, DRAW_TRIANGLES, LINE_TO, MOVE_TO:
+					if (currentFill == null)
+					{
+						valid = false;
+						break;
+					}
+
+					startGroup();
+
+					if (!copyCommand(currentGroup, type))
+					{
+						valid = false;
+						break;
+					}
+
+					hasDrawing = true;
+
+				case END_FILL:
+					if (currentFill == null)
+					{
+						valid = false;
+						break;
+					}
+
+					if (!hasDrawing)
+					{
+						valid = false;
+						break;
+					}
+
+					startGroup();
+					if (!copyCommand(currentGroup, type))
+					{
+						valid = false;
+						break;
+					}
+
+					flushGroup();
+					releaseDrawCommandBuffer(currentFill);
+					currentFill = null;
+
+				case OVERRIDE_BLEND_MODE:
+					var c = data.readOverrideBlendMode();
+					if (currentFill != null)
+					{
+						startGroup();
+						currentGroup.overrideBlendMode(c.blendMode);
+					}
+					else
+					{
+						flushGroup();
+					}
+					currentBlendMode = c.blendMode;
+
+				case LINE_STYLE:
+					if (currentFill != null)
+					{
+						startGroup();
+						var c = data.readLineStyle();
+						currentGroup.lineStyle(c.thickness, c.color, c.alpha, c.pixelHinting, c.scaleMode, c.caps, c.joints, c.miterLimit);
+						if (currentLineStyle != null) releaseDrawCommandBuffer(currentLineStyle);
+						currentLineStyle = getPooledDrawCommandBuffer();
+						currentLineStyle.lineStyle(c.thickness, c.color, c.alpha, c.pixelHinting, c.scaleMode, c.caps, c.joints, c.miterLimit);
+					}
+					else
+					{
+						flushGroup();
+						if (currentLineStyle != null) releaseDrawCommandBuffer(currentLineStyle);
+						currentLineStyle = getPooledDrawCommandBuffer();
+
+						if (!copyCommand(currentLineStyle, type))
+						{
+							valid = false;
+							break;
+						}
+					}
+
+				case LINE_BITMAP_STYLE, LINE_GRADIENT_STYLE, OVERRIDE_MATRIX, WINDING_EVEN_ODD, WINDING_NON_ZERO:
+					if (currentFill == null)
+					{
+						valid = false;
+						break;
+					}
+
+					startGroup();
+					if (!copyCommand(currentGroup, type))
+					{
+						valid = false;
+						break;
+					}
+
+				default:
+					valid = false;
+					break;
+			}
+
+			if (!valid) break;
+		}
+
+		if (valid && currentFill != null) valid = false;
+
+		if (valid)
+		{
+			flushGroup();
+
+			var blendMode = initialBlendMode;
+
+			var i = drawGroups.length;
+
+			while (i > 0)
+			{
+				var index = --i;
+				var groupBlendMode = groupBlendModes[index];
+
+				if (groupBlendMode != blendMode)
+				{
+					result.overrideBlendMode(groupBlendMode);
+					blendMode = groupBlendMode;
+				}
+
+				var group = drawGroups[index];
+				data.reset();
+				data.buffer = group;
+
+				for (type in group.types)
+					copyCommand(result, type);
+
+				releaseDrawCommandBuffer(group);
+			}
+		}
+		else
+		{
+			releaseDrawCommandBuffer(currentGroup);
+			releaseDrawCommandBuffer(currentFill);
+			for (group in drawGroups)
+			{
+				releaseDrawCommandBuffer(group);
+			}
+
+			releaseDrawCommandBuffer(result);
+			result = null;
+		}
+
+		releaseDrawCommandBuffer(currentLineStyle);
+		data.destroy();
+
+		return result;
+	}
+
+	@:noCompletion private static function buildBuffer(graphics:Graphics, renderer:OpenGLRenderer, commands:DrawCommandBuffer):Void
 	{
 		var quadBufferPosition = 0;
 		var triangleIndexBufferPosition = 0;
@@ -57,7 +524,7 @@ class Context3DGraphics
 
 		var data = buildBufferReader;
 		data.reset();
-		data.buffer = graphics.__commands;
+		data.buffer = commands;
 
 		var context = renderer.__context3D;
 
@@ -212,8 +679,9 @@ class Context3DGraphics
 		#if !openfl_disable_graphics_tessellator
 		if (graphics.__tessellatedFillParts != null && graphics.__tessellatedFillParts.length > 0)
 		{
-			for (part in graphics.__tessellatedFillParts)
+			for (i in 0...graphics.__tessellatedFillParts.length)
 			{
+				var part = graphics.__tessellatedFillParts[i];
 				bitmap = part.bitmap;
 				bitmapMatrix = part.bitmapMatrix;
 				buildDrawTrianglesBuffer(part.vertices, part.indices, part.uvtData, NONE);
@@ -222,7 +690,7 @@ class Context3DGraphics
 		else
 		#end
 		{
-			for (type in graphics.__commands.types)
+			for (type in commands.types)
 			{
 				switch (type)
 				{
@@ -914,7 +1382,7 @@ class Context3DGraphics
 				if (graphics.__hardwareDirty
 					|| (graphics.__quadBuffer == null && graphics.__vertexBuffer == null && graphics.__vertexBufferUVT == null))
 				{
-					buildBuffer(graphics, renderer);
+					buildBuffer(graphics, renderer, graphics.__commands);
 				}
 
 				var scale9Grid:Rectangle = graphics.__owner.__scale9Grid;
@@ -955,12 +1423,29 @@ class Context3DGraphics
 				var vertexBufferPosition = 0;
 				var vertexBufferPositionUVT = 0;
 
+				var depthPass:Bool = false;
+
+				var currentZ:Float = 0;
+				var maxZ:Float = 32768;
+
+				inline function setup_depth_stuff():Bool
+				{
+					var zOffset:Float = !depthPass ? 0.5 : 0.0;
+
+					if (!renderer.applyPositionZ(1.0 - ((currentZ + zOffset) / maxZ)) && depthPass) return false;
+					if (!renderer.applyDepthPassCondition(depthPass) && depthPass) return false;
+
+					return true;
+				}
+
 				inline function renderDrawTriangles(verticesLength:Int, indicesLength:Int, uvDataLength:Int, culling:TriangleCulling):Void
 				{
 					if (bitmap != null && uvDataLength == 0)
 					{
 						uvDataLength = verticesLength;
 					}
+
+					var depth_result:Bool = true;
 
 					if (bitmap != null || shaderBuffer != null || (uvDataLength == 0 && fill != null))
 					{
@@ -983,6 +1468,7 @@ class Context3DGraphics
 							shader = renderer.__initShaderBuffer(shaderBuffer);
 
 							renderer.__setShaderBuffer(shaderBuffer);
+							depth_result = setup_depth_stuff();
 							renderer.applyMatrix(uMatrix);
 							renderer.applyBitmapData(bitmap, false, repeat);
 							renderer.applyAlpha(1);
@@ -993,6 +1479,7 @@ class Context3DGraphics
 						{
 							shader = maskRender ? renderer.__maskShader : renderer.__initGraphicsShader(null);
 							renderer.setShader(shader);
+							depth_result = setup_depth_stuff();
 							renderer.applyMatrix(uMatrix);
 							renderer.applyBitmapData(bitmap, smooth, repeat);
 							renderer.applyAlpha(graphics.__owner.__worldAlpha);
@@ -1003,6 +1490,7 @@ class Context3DGraphics
 						{
 							shader = maskRender ? renderer.__maskShader : renderer.__initGraphicsShader(null);
 							renderer.setShader(shader);
+							depth_result = setup_depth_stuff();
 							renderer.applyMatrix(uMatrix);
 							renderer.applyBitmapData(blankBitmapData, true, repeat);
 							var color:ARGB = (fill : ARGB);
@@ -1040,7 +1528,7 @@ class Context3DGraphics
 							default:
 						}
 
-						context.__drawTriangles(0, length);
+						if (depth_result) context.__drawTriangles(0, length);
 
 						shaderBufferOffset += length;
 						if (hasUVTData)
@@ -1122,107 +1610,300 @@ class Context3DGraphics
 				}
 				#end
 
-				for (type in graphics.__commands.types)
+				var forwardCommands:DrawCommandBuffer = cloneDrawCommandBuffer(graphics.__commands);
+				var reversedCommands:DrawCommandBuffer = buildReversedDrawGroups(forwardCommands, graphics.__owner.__worldBlendMode);
+
+				inline function render_pass(enableDepthPass:Bool)
 				{
-					switch (type)
+					depthPass = enableDepthPass;
+
+					var passCommands = depthPass ? reversedCommands : forwardCommands;
+					if (passCommands == null) return;
+
+					if (graphics.__hardwareDirty || graphics.__hardwareCommandsReversed != depthPass)
 					{
-						case BEGIN_BITMAP_FILL:
-							flushBitmapLinePath();
-							var c = data.readBeginBitmapFill();
-							bitmap = c.bitmap;
-							bitmapMatrix = c.matrix;
-							repeat = c.repeat;
-							smooth = c.smooth;
-							shaderBuffer = null;
-							fill = null;
+						buildBuffer(graphics, renderer, passCommands);
+						graphics.__hardwareCommandsReversed = depthPass;
+						graphics.__hardwareDirty = false;
+					}
 
-						case BEGIN_GRADIENT_FILL:
-							flushBitmapLinePath();
-							// not implemented yet, but we don't want to keep
-							// the previous fill either.
-							data.skip(type);
+					data.reset();
+					data.buffer = passCommands;
 
-							fill = 0x00000000;
-							shaderBuffer = null;
-							bitmap = null;
-							bitmapMatrix = null;
+					quadBufferPosition = 0;
+					shaderBufferOffset = 0;
+					triangleIndexBufferPosition = 0;
+					vertexBufferPosition = 0;
+					vertexBufferPositionUVT = 0;
+					linePathVertices.length = 0;
+					reducedLinePathVertices.length = 0;
+					linePathMoveCount = 0;
+					linePathSegmentCount = 0;
+					shaderBuffer = null;
+					bitmap = null;
+					bitmapMatrix = null;
+					repeat = false;
+					smooth = false;
+					fill = null;
 
-						case BEGIN_FILL:
-							flushBitmapLinePath();
-							var c = data.readBeginFill();
-							var color = Std.int(c.color);
-							var alpha = Std.int(c.alpha * 0xFF);
+					if (depthPass)
+					{
+						renderer.setGLBlend(false);
+					}
+					else
+					{
+						renderer.setGLBlend(true);
+					}
 
-							fill = (color & 0xFFFFFF) | (alpha << 24);
-							shaderBuffer = null;
-							bitmap = null;
-							bitmapMatrix = null;
+					renderer.setGLDepthTest(true, Context3DCompareMode.LESS_EQUAL);
 
-						case BEGIN_SHADER_FILL:
-							flushBitmapLinePath();
-							var c = data.readBeginShaderFill();
-							shaderBuffer = c.shaderBuffer;
-							shaderBufferOffset = 0;
+					for (type in passCommands.types)
+					{
+						var depth_result:Bool = true;
 
-							if (shaderBuffer == null || shaderBuffer.shader == null || shaderBuffer.shader.__bitmap == null)
-							{
+						switch (type)
+						{
+							case BEGIN_BITMAP_FILL:
+								flushBitmapLinePath();
+								var c = data.readBeginBitmapFill();
+								currentZ = c.zIndex;
+								bitmap = c.bitmap;
+								bitmapMatrix = c.matrix;
+								repeat = c.repeat;
+								smooth = c.smooth;
+								shaderBuffer = null;
+								fill = null;
+
+							case BEGIN_GRADIENT_FILL:
+								flushBitmapLinePath();
+								// not implemented yet, but we don't want to keep
+								// the previous fill either.
+								data.skip(type);
+
+								currentZ = 0;
+								fill = 0x00000000;
+								shaderBuffer = null;
 								bitmap = null;
-							}
-							else
-							{
-								bitmap = shaderBuffer.shader.__bitmap.input;
-							}
+								bitmapMatrix = null;
 
-							fill = null;
-							bitmapMatrix = null;
+							case BEGIN_FILL:
+								flushBitmapLinePath();
+								var c = data.readBeginFill();
+								var color = Std.int(c.color);
+								var alpha = Std.int(c.alpha * 0xFF);
 
-						case DRAW_QUADS:
-							flushBitmapLinePath();
-							if (bitmap != null || fill != null)
-							{
-								var c = data.readDrawQuads();
-								var rects = c.rects;
-								var indices = c.indices;
-								var transforms = c.transforms;
+								currentZ = c.zIndex;
+								fill = (color & 0xFFFFFF) | (alpha << 24);
+								shaderBuffer = null;
+								bitmap = null;
+								bitmapMatrix = null;
 
-								#if cpp
-								var rects:Array<Float> = rects == null ? null : untyped (rects).__array;
-								var indices:Array<Int> = indices == null ? null : untyped (indices).__array;
-								var transforms:Array<Float> = transforms == null ? null : untyped (transforms).__array;
-								#end
+							case BEGIN_SHADER_FILL:
+								flushBitmapLinePath();
+								var c = data.readBeginShaderFill();
 
-								var hasIndices = (indices != null);
-								var length = hasIndices ? indices.length : Math.floor(rects.length / 4);
+								currentZ = c.zIndex;
+								shaderBuffer = c.shaderBuffer;
+								shaderBufferOffset = 0;
 
-								var uMatrix = renderer.__getMatrix(graphics.__owner.__renderTransform, AUTO);
-								var shader:Shader;
-
-								if (shaderBuffer != null && !maskRender)
+								if (shaderBuffer == null || shaderBuffer.shader == null || shaderBuffer.shader.__bitmap == null)
 								{
-									shader = renderer.__initShaderBuffer(shaderBuffer);
-
-									renderer.__setShaderBuffer(shaderBuffer);
-									renderer.applyMatrix(uMatrix);
-									renderer.applyBitmapData(bitmap, false /* ignored */, repeat);
-									renderer.applyAlpha(graphics.__owner.__worldAlpha);
-									renderer.applyColorTransform(graphics.__owner.__worldColorTransform);
-									// renderer.__updateShaderBuffer ();
-								}
-								else if (bitmap != null)
-								{
-									shader = maskRender ? renderer.__maskShader : renderer.__initGraphicsShader(null);
-									renderer.setShader(shader);
-									renderer.applyMatrix(uMatrix);
-									renderer.applyBitmapData(bitmap, smooth, repeat);
-									renderer.applyAlpha(graphics.__owner.__worldAlpha);
-									renderer.applyColorTransform(graphics.__owner.__worldColorTransform);
-									renderer.updateShader();
+									bitmap = null;
 								}
 								else
 								{
-									shader = maskRender ? renderer.__maskShader : renderer.__initGraphicsShader(null);
-									renderer.setShader(shader);
-									renderer.applyMatrix(uMatrix);
+									bitmap = shaderBuffer.shader.__bitmap.input;
+								}
+
+								fill = null;
+								bitmapMatrix = null;
+
+							case DRAW_QUADS:
+								flushBitmapLinePath();
+								var c = data.readDrawQuads();
+
+								currentZ = c.zIndex;
+
+								if (bitmap != null || fill != null)
+								{
+									var rects = c.rects;
+									var indices = c.indices;
+									var transforms = c.transforms;
+
+									#if cpp
+									var rects:Array<Float> = rects == null ? null : untyped (rects).__array;
+									var indices:Array<Int> = indices == null ? null : untyped (indices).__array;
+									var transforms:Array<Float> = transforms == null ? null : untyped (transforms).__array;
+									#end
+
+									var hasIndices = (indices != null);
+									var length = hasIndices ? indices.length : Math.floor(rects.length / 4);
+
+									var uMatrix = renderer.__getMatrix(graphics.__owner.__renderTransform, AUTO);
+									var shader:Shader;
+
+									if (shaderBuffer != null && !maskRender)
+									{
+										shader = renderer.__initShaderBuffer(shaderBuffer);
+
+										renderer.__setShaderBuffer(shaderBuffer, depthPass);
+										depth_result = setup_depth_stuff();
+										renderer.applyMatrix(uMatrix);
+										renderer.applyBitmapData(bitmap, false /* ignored */, repeat);
+										renderer.applyAlpha(graphics.__owner.__worldAlpha);
+										renderer.applyColorTransform(graphics.__owner.__worldColorTransform);
+										// renderer.__updateShaderBuffer ();
+									}
+									else if (bitmap != null)
+									{
+										shader = maskRender ? renderer.__maskShader : renderer.__initGraphicsShader(null);
+										renderer.setShader(shader, depthPass);
+										depth_result = setup_depth_stuff();
+										renderer.applyMatrix(uMatrix);
+										renderer.applyBitmapData(bitmap, smooth, repeat);
+										renderer.applyAlpha(graphics.__owner.__worldAlpha);
+										renderer.applyColorTransform(graphics.__owner.__worldColorTransform);
+										renderer.updateShader();
+									}
+									else
+									{
+										shader = maskRender ? renderer.__maskShader : renderer.__initGraphicsShader(null);
+										renderer.setShader(shader, depthPass);
+										depth_result = setup_depth_stuff();
+										renderer.applyMatrix(uMatrix);
+										renderer.applyBitmapData(blankBitmapData, true, repeat);
+										var color:ARGB = (fill : ARGB);
+										tempColorTransform.__identity();
+										var worldColorTransform = graphics.__owner.__worldColorTransform;
+										tempColorTransform.redMultiplier = worldColorTransform.redMultiplier;
+										tempColorTransform.greenMultiplier = worldColorTransform.greenMultiplier;
+										tempColorTransform.blueMultiplier = worldColorTransform.blueMultiplier;
+										tempColorTransform.alphaMultiplier = worldColorTransform.alphaMultiplier;
+										tempColorTransform.redOffset = color.r * worldColorTransform.redMultiplier + worldColorTransform.redOffset;
+										tempColorTransform.greenOffset = color.g * worldColorTransform.greenMultiplier + worldColorTransform.greenOffset;
+										tempColorTransform.blueOffset = color.b * worldColorTransform.blueMultiplier + worldColorTransform.blueOffset;
+										tempColorTransform.alphaOffset = color.a * worldColorTransform.alphaMultiplier + worldColorTransform.alphaOffset;
+										renderer.applyAlpha((color.a / 0xFF) * graphics.__owner.__worldAlpha);
+										renderer.applyColorTransform(tempColorTransform);
+										renderer.updateShader();
+									}
+
+									var end = quadBufferPosition + length;
+
+									while (quadBufferPosition < end)
+									{
+										length = Std.int(Math.min(end - quadBufferPosition, context.__quadIndexBufferElements));
+										if (length <= 0) break;
+
+										if (shaderBuffer != null && !maskRender)
+										{
+											renderer.__updateShaderBuffer(shaderBufferOffset);
+										}
+
+										if (shader.__position != null) context.setVertexBufferAt(shader.__position.index, graphics.__quadBuffer.vertexBuffer,
+											quadBufferPosition * 16, FLOAT_2);
+										if (shader.__textureCoord != null) context.setVertexBufferAt(shader.__textureCoord.index,
+											graphics.__quadBuffer.vertexBuffer, (quadBufferPosition * 16) + 2, FLOAT_2);
+
+										if (depth_result) context.drawTriangles(context.__quadIndexBuffer, 0, length * 2);
+
+										shaderBufferOffset += length * 4;
+										quadBufferPosition += length;
+									}
+
+									#if gl_stats
+									Context3DStats.incrementDrawCall(DrawCallContext.STAGE);
+									#end
+
+									renderer.__clearShader();
+								}
+							case DRAW_CIRCLE:
+								flushBitmapLinePath();
+								var c = data.readDrawCircle();
+								var radius = c.radius;
+
+								var numVertices = PolygonFunctions.getEllipseNumVertices(radius, radius);
+
+								currentZ = c.zIndex;
+
+								renderDrawTriangles(numVertices * 2, (numVertices - 2) * 3, 0, NONE);
+
+							case DRAW_ELLIPSE:
+								flushBitmapLinePath();
+								var c = data.readDrawEllipse();
+								var radiusX = c.width / 2.0;
+								var radiusY = c.height / 2.0;
+
+								var scaleX = graphics.__owner.scaleX;
+								var scaleY = graphics.__owner.scaleY;
+
+								var numVertices = PolygonFunctions.getEllipseNumVertices(radiusX * scaleX, radiusY * scaleY);
+
+								currentZ = c.zIndex;
+
+								renderDrawTriangles(numVertices * 2, (numVertices - 2) * 3, 0, NONE);
+
+							case DRAW_ROUND_RECT:
+								flushBitmapLinePath();
+								var c = data.readDrawRoundRect();
+								var radiusX = c.ellipseWidth / 2.0;
+								var radiusY = (c.ellipseHeight != null ? c.ellipseHeight : c.ellipseWidth) / 2.0;
+
+								var scaleX = (hasScale9Grid
+									&& c.x + radiusX <= scale9Grid.x
+									&& c.x + c.width - radiusX >= scale9Grid.x + scale9Grid.width) ? 1.0 : graphics.__owner.scaleX;
+								var scaleY = (hasScale9Grid
+									&& c.y + radiusY <= scale9Grid.y
+									&& c.y + c.height - radiusX >= scale9Grid.y + scale9Grid.height) ? 1.0 : graphics.__owner.scaleY;
+
+								var numVertices = PolygonFunctions.getRoundRectNumVertices(radiusX * scaleX, radiusY * scaleY);
+
+								currentZ = c.zIndex;
+
+								renderDrawTriangles(numVertices * 2, (numVertices - 2) * 3, 0, NONE);
+
+							case DRAW_RECT:
+								flushBitmapLinePath();
+								var c = data.readDrawRect();
+
+								currentZ = c.zIndex;
+
+								if (bitmap != null)
+								{
+									renderDrawTriangles(8, 6, 0, NONE);
+								}
+								else if (fill != null)
+								{
+									var x = c.x;
+									var y = c.y;
+									var width = c.width;
+									var height = c.height;
+
+									if (hasScale9Grid)
+									{
+										var scaledLeft = toScale9Position(c.x, scale9Grid.x, scale9Grid.width, bounds.width, graphics.__owner.scaleX);
+										var scaledTop = toScale9Position(c.y, scale9Grid.y, scale9Grid.height, bounds.height, graphics.__owner.scaleY);
+										var scaledRight = toScale9Position(c.x + c.width, scale9Grid.x, scale9Grid.width, bounds.width,
+											graphics.__owner.scaleX);
+										var scaledBottom = toScale9Position(c.y + c.height, scale9Grid.y, scale9Grid.height, bounds.height,
+											graphics.__owner.scaleY);
+
+										x = scaledLeft / graphics.__owner.scaleX;
+										y = scaledTop / graphics.__owner.scaleY;
+										width = (scaledRight - scaledLeft) / graphics.__owner.scaleX;
+										height = (scaledBottom - scaledTop) / graphics.__owner.scaleY;
+									}
+
+									matrix.identity();
+									matrix.scale(width, height);
+									matrix.tx = x;
+									matrix.ty = y;
+									matrix.concat(graphics.__owner.__renderTransform);
+
+									var shader = maskRender ? renderer.__maskShader : renderer.__initGraphicsShader(null);
+									renderer.setShader(shader, depthPass);
+									depth_result = setup_depth_stuff();
+									renderer.applyMatrix(renderer.__getMatrix(matrix, AUTO));
 									renderer.applyBitmapData(blankBitmapData, true, repeat);
 									var color:ARGB = (fill : ARGB);
 									tempColorTransform.__identity();
@@ -1238,188 +1919,79 @@ class Context3DGraphics
 									renderer.applyAlpha((color.a / 0xFF) * graphics.__owner.__worldAlpha);
 									renderer.applyColorTransform(tempColorTransform);
 									renderer.updateShader();
+
+									var vertexBuffer = blankBitmapData.getVertexBuffer(context);
+									if (shader.__position != null) context.setVertexBufferAt(shader.__position.index, vertexBuffer, 0, FLOAT_3);
+									if (shader.__textureCoord != null) context.setVertexBufferAt(shader.__textureCoord.index, vertexBuffer, 3, FLOAT_2);
+									var indexBuffer = blankBitmapData.getIndexBuffer(context);
+
+									if (depth_result) context.drawTriangles(indexBuffer);
+
+									shaderBufferOffset += 4;
+
+									#if gl_stats
+									Context3DStats.incrementDrawCall(DrawCallContext.STAGE);
+									#end
+
+									renderer.__clearShader();
 								}
 
-								var end = quadBufferPosition + length;
+							case DRAW_TRIANGLES:
+								flushBitmapLinePath();
+								var c = data.readDrawTriangles();
+								var vertices = c.vertices;
+								var indices = c.indices;
+								var uvtData = c.uvtData;
+								var culling = c.culling;
 
-								while (quadBufferPosition < end)
-								{
-									length = Std.int(Math.min(end - quadBufferPosition, context.__quadIndexBufferElements));
-									if (length <= 0) break;
+								currentZ = c.zIndex;
 
-									if (shaderBuffer != null && !maskRender)
-									{
-										renderer.__updateShaderBuffer(shaderBufferOffset);
-									}
+								renderDrawTriangles(vertices.length, indices != null ? indices.length : 0, uvtData != null ? uvtData.length : 0, culling);
 
-									if (shader.__position != null) context.setVertexBufferAt(shader.__position.index, graphics.__quadBuffer.vertexBuffer,
-										quadBufferPosition * 16, FLOAT_2);
-									if (shader.__textureCoord != null) context.setVertexBufferAt(shader.__textureCoord.index,
-										graphics.__quadBuffer.vertexBuffer, (quadBufferPosition * 16) + 2, FLOAT_2);
+							case END_FILL:
+								var c = data.readEndFill();
 
-									context.drawTriangles(context.__quadIndexBuffer, 0, length * 2);
+								flushBitmapLinePath();
+								bitmap = null;
+								bitmapMatrix = null;
+								fill = null;
+								shaderBuffer = null;
+								context.setCulling(NONE);
 
-									shaderBufferOffset += length * 4;
-									quadBufferPosition += length;
-								}
+							case MOVE_TO:
+								flushBitmapLinePath();
+								var c = data.readMoveTo();
+								positionX = c.x;
+								positionY = c.y;
+								linePathVertices.push(c.x);
+								linePathVertices.push(c.y);
+								linePathMoveCount = 1;
 
-								#if gl_stats
-								Context3DStats.incrementDrawCall(DrawCallContext.STAGE);
-								#end
+							case LINE_TO:
+								var c = data.readLineTo();
+								positionX = c.x;
+								positionY = c.y;
+								linePathVertices.push(c.x);
+								linePathVertices.push(c.y);
+								linePathSegmentCount++;
 
-								renderer.__clearShader();
-							}
-						case DRAW_CIRCLE:
-							flushBitmapLinePath();
-							var c = data.readDrawCircle();
-							var radius = c.radius;
+							case OVERRIDE_BLEND_MODE:
+								flushBitmapLinePath();
+								var c = data.readOverrideBlendMode();
+								renderer.__setBlendMode(c.blendMode);
 
-							var numVertices = PolygonFunctions.getEllipseNumVertices(radius, radius);
-							renderDrawTriangles(numVertices * 2, (numVertices - 2) * 3, 0, NONE);
-
-						case DRAW_ELLIPSE:
-							flushBitmapLinePath();
-							var c = data.readDrawEllipse();
-							var radiusX = c.width / 2.0;
-							var radiusY = c.height / 2.0;
-
-							var scaleX = graphics.__owner.scaleX;
-							var scaleY = graphics.__owner.scaleY;
-
-							var numVertices = PolygonFunctions.getEllipseNumVertices(radiusX * scaleX, radiusY * scaleY);
-							renderDrawTriangles(numVertices * 2, (numVertices - 2) * 3, 0, NONE);
-
-						case DRAW_ROUND_RECT:
-							flushBitmapLinePath();
-							var c = data.readDrawRoundRect();
-							var radiusX = c.ellipseWidth / 2.0;
-							var radiusY = (c.ellipseHeight != null ? c.ellipseHeight : c.ellipseWidth) / 2.0;
-
-							var scaleX = (hasScale9Grid
-								&& c.x + radiusX <= scale9Grid.x
-								&& c.x + c.width - radiusX >= scale9Grid.x + scale9Grid.width) ? 1.0 : graphics.__owner.scaleX;
-							var scaleY = (hasScale9Grid
-								&& c.y + radiusY <= scale9Grid.y
-								&& c.y + c.height - radiusX >= scale9Grid.y + scale9Grid.height) ? 1.0 : graphics.__owner.scaleY;
-
-							var numVertices = PolygonFunctions.getRoundRectNumVertices(radiusX * scaleX, radiusY * scaleY);
-							renderDrawTriangles(numVertices * 2, (numVertices - 2) * 3, 0, NONE);
-
-						case DRAW_RECT:
-							flushBitmapLinePath();
-							var c = data.readDrawRect();
-
-							if (bitmap != null)
-							{
-								renderDrawTriangles(8, 6, 0, NONE);
-							}
-							else if (fill != null)
-							{
-								var x = c.x;
-								var y = c.y;
-								var width = c.width;
-								var height = c.height;
-
-								if (hasScale9Grid)
-								{
-									var scaledLeft = toScale9Position(c.x, scale9Grid.x, scale9Grid.width, bounds.width, graphics.__owner.scaleX);
-									var scaledTop = toScale9Position(c.y, scale9Grid.y, scale9Grid.height, bounds.height, graphics.__owner.scaleY);
-									var scaledRight = toScale9Position(c.x + c.width, scale9Grid.x, scale9Grid.width, bounds.width, graphics.__owner.scaleX);
-									var scaledBottom = toScale9Position(c.y + c.height, scale9Grid.y, scale9Grid.height, bounds.height,
-										graphics.__owner.scaleY);
-
-									x = scaledLeft / graphics.__owner.scaleX;
-									y = scaledTop / graphics.__owner.scaleY;
-									width = (scaledRight - scaledLeft) / graphics.__owner.scaleX;
-									height = (scaledBottom - scaledTop) / graphics.__owner.scaleY;
-								}
-
-								matrix.identity();
-								matrix.scale(width, height);
-								matrix.tx = x;
-								matrix.ty = y;
-								matrix.concat(graphics.__owner.__renderTransform);
-
-								var shader = maskRender ? renderer.__maskShader : renderer.__initGraphicsShader(null);
-								renderer.setShader(shader);
-								renderer.applyMatrix(renderer.__getMatrix(matrix, AUTO));
-								renderer.applyBitmapData(blankBitmapData, true, repeat);
-								var color:ARGB = (fill : ARGB);
-								tempColorTransform.__identity();
-								var worldColorTransform = graphics.__owner.__worldColorTransform;
-								tempColorTransform.redMultiplier = worldColorTransform.redMultiplier;
-								tempColorTransform.greenMultiplier = worldColorTransform.greenMultiplier;
-								tempColorTransform.blueMultiplier = worldColorTransform.blueMultiplier;
-								tempColorTransform.alphaMultiplier = worldColorTransform.alphaMultiplier;
-								tempColorTransform.redOffset = color.r * worldColorTransform.redMultiplier + worldColorTransform.redOffset;
-								tempColorTransform.greenOffset = color.g * worldColorTransform.greenMultiplier + worldColorTransform.greenOffset;
-								tempColorTransform.blueOffset = color.b * worldColorTransform.blueMultiplier + worldColorTransform.blueOffset;
-								tempColorTransform.alphaOffset = color.a * worldColorTransform.alphaMultiplier + worldColorTransform.alphaOffset;
-								renderer.applyAlpha((color.a / 0xFF) * graphics.__owner.__worldAlpha);
-								renderer.applyColorTransform(tempColorTransform);
-								renderer.updateShader();
-
-								var vertexBuffer = blankBitmapData.getVertexBuffer(context);
-								if (shader.__position != null) context.setVertexBufferAt(shader.__position.index, vertexBuffer, 0, FLOAT_3);
-								if (shader.__textureCoord != null) context.setVertexBufferAt(shader.__textureCoord.index, vertexBuffer, 3, FLOAT_2);
-								var indexBuffer = blankBitmapData.getIndexBuffer(context);
-								context.drawTriangles(indexBuffer);
-
-								shaderBufferOffset += 4;
-
-								#if gl_stats
-								Context3DStats.incrementDrawCall(DrawCallContext.STAGE);
-								#end
-
-								renderer.__clearShader();
-							}
-
-						case DRAW_TRIANGLES:
-							flushBitmapLinePath();
-							var c = data.readDrawTriangles();
-							var vertices = c.vertices;
-							var indices = c.indices;
-							var uvtData = c.uvtData;
-							var culling = c.culling;
-
-							renderDrawTriangles(vertices.length, indices != null ? indices.length : 0, uvtData != null ? uvtData.length : 0, culling);
-
-						case END_FILL:
-							flushBitmapLinePath();
-							bitmap = null;
-							bitmapMatrix = null;
-							fill = null;
-							shaderBuffer = null;
-							data.skip(type);
-							context.setCulling(NONE);
-
-						case MOVE_TO:
-							flushBitmapLinePath();
-							var c = data.readMoveTo();
-							positionX = c.x;
-							positionY = c.y;
-							linePathVertices.push(c.x);
-							linePathVertices.push(c.y);
-							linePathMoveCount = 1;
-
-						case LINE_TO:
-							var c = data.readLineTo();
-							positionX = c.x;
-							positionY = c.y;
-							linePathVertices.push(c.x);
-							linePathVertices.push(c.y);
-							linePathSegmentCount++;
-
-						case OVERRIDE_BLEND_MODE:
-							flushBitmapLinePath();
-							var c = data.readOverrideBlendMode();
-							renderer.__setBlendMode(c.blendMode);
-
-						default:
-							flushBitmapLinePath();
-							data.skip(type);
+							default:
+								flushBitmapLinePath();
+								data.skip(type);
+						}
 					}
 				}
+
+				renderer.clearDepthBuffer();
+				render_pass(true);
+
+				releaseDrawCommandBuffer(reversedCommands);
+				releaseDrawCommandBuffer(forwardCommands);
 
 				Matrix.__pool.release(matrix);
 			}

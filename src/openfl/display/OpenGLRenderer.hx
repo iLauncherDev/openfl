@@ -17,6 +17,7 @@ import openfl.display._internal.ShaderBuffer;
 import openfl.display3D.Context3D;
 import openfl.display3D.Context3DBlendTarget;
 import openfl.display3D.Context3DClearMask;
+import openfl.display3D.Context3DCompareMode;
 import openfl.geom.ColorTransform;
 import openfl.geom.Matrix;
 import openfl.geom.Rectangle;
@@ -56,6 +57,8 @@ class OpenGLRenderer extends DisplayObjectRenderer
 	@:noCompletion private static var __drawBuffersARB:Null<Bool>;
 	@:noCompletion private static var __drawBuffersWEBGL:Null<Bool>;
 
+	@:noCompletion private static var __positionZ:Array<Float> = [0];
+	@:noCompletion private static var __depthPass:Array<Bool> = [false];
 	@:noCompletion private static var __alphaValue:Array<Float> = [1];
 	@:noCompletion private static var __colorMultipliersValue:Array<Float> = [0, 0, 0, 0];
 	@:noCompletion private static var __colorOffsetsValue:Array<Float> = [0, 0, 0, 0];
@@ -243,6 +246,63 @@ class OpenGLRenderer extends DisplayObjectRenderer
 		__maskShader = __staticMaskShader;
 	}
 
+	public function clearDepthBuffer()
+	{
+		__context3D.clear(0, 0, 0, 0, 1, 0, Context3DClearMask.DEPTH);
+	}
+
+	public function setGLDepthTest(depthMask:Bool, passCompareMode:Context3DCompareMode)
+	{
+		__context3D.setDepthTest(depthMask, passCompareMode);
+	}
+
+	public function setGLBlend(enabled:Bool)
+	{
+		__context3D.__setGLBlend(enabled);
+	}
+
+	public function applyDepthPassCondition(depthPass:Bool):Bool
+	{
+		__depthPass[0] = depthPass;
+
+		if (__currentShaderBuffer != null)
+		{
+			__currentShaderBuffer.addBoolOverride("openfl_IsDepthPass", __depthPass);
+			return true;
+		}
+		else if (__currentShader != null)
+		{
+			if (__currentShader.__depthPass != null)
+			{
+				__currentShader.__depthPass.value = __depthPass;
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	public function applyPositionZ(positionZ:Float):Bool
+	{
+		__positionZ[0] = positionZ;
+
+		if (__currentShaderBuffer != null)
+		{
+			__currentShaderBuffer.addFloatOverride("openfl_PositionZ", __positionZ);
+			return true;
+		}
+		else if (__currentShader != null)
+		{
+			if (__currentShader.__positionZ != null)
+			{
+				__currentShader.__positionZ.value = __positionZ;
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	/**
 		Applies an alpha value to the active shader, if compatible with OpenFL core shaders
 	**/
@@ -420,7 +480,7 @@ class OpenGLRenderer extends DisplayObjectRenderer
 		Sets the current active shader, which automatically unbinds the previous shader
 		if it was bound using an OpenFL Shader object
 	**/
-	public function setShader(shader:Shader):Void
+	public function setShader(shader:Shader, isDepthPass:Bool = false):Void
 	{
 		__currentShaderBuffer = null;
 
@@ -568,6 +628,8 @@ class OpenGLRenderer extends DisplayObjectRenderer
 
 	@:noCompletion private override function __clear():Void
 	{
+		__context3D.clear(0, 0, 0, 0, 1, 0, Context3DClearMask.DEPTH);
+
 		if (__stage == null || __stage.__transparent)
 		{
 			__context3D.clear(0, 0, 0, 0, 0, 0, Context3DClearMask.COLOR);
@@ -1414,9 +1476,9 @@ class OpenGLRenderer extends DisplayObjectRenderer
 		}
 	}
 
-	@:noCompletion private function __setShaderBuffer(shaderBuffer:ShaderBuffer):Void
+	@:noCompletion private function __setShaderBuffer(shaderBuffer:ShaderBuffer, isDepthPass:Bool = false):Void
 	{
-		setShader(shaderBuffer.shader);
+		setShader(shaderBuffer.shader, isDepthPass);
 		__currentShaderBuffer = shaderBuffer;
 
 		applyShaderBlend();

@@ -15,6 +15,8 @@ class GraphicsShader extends Shader
 		varying vec4 openfl_ColorOffsetv;
 		varying vec2 openfl_TextureCoordv;
 
+		uniform float openfl_PositionZ;
+
 		uniform mat4 openfl_Matrix;
 		uniform bool openfl_HasColorTransform;
 		uniform vec2 openfl_TextureSize;", true)
@@ -28,7 +30,10 @@ class GraphicsShader extends Shader
 
 		}
 
-		gl_Position = openfl_Matrix * openfl_Position;")
+		vec4 out_position = openfl_Matrix * openfl_Position;
+		out_position.z = openfl_PositionZ;
+
+		gl_Position = out_position;")
 	@:glVertexSource("#pragma header
 
 		void main(void) {
@@ -40,6 +45,8 @@ class GraphicsShader extends Shader
 		varying vec4 openfl_ColorMultiplierv;
 		varying vec4 openfl_ColorOffsetv;
 		varying vec2 openfl_TextureCoordv;
+
+		uniform bool openfl_IsDepthPass;
 
 		uniform bool openfl_HasColorTransform;
 		uniform vec2 openfl_TextureSize;
@@ -401,7 +408,12 @@ class GraphicsShader extends Shader
 			return openfl_applyBlend (color * openfl_Alphav);
 
 		}", true)
-	@:glFragmentBody("gl_FragColor = openfl_texture2D (bitmap, openfl_TextureCoordv);", true)
+	@:glFragmentBody("
+		vec4 color = openfl_texture2D (bitmap, openfl_TextureCoordv);
+		DEPTH_ALPHA_CHECK(color.a);
+
+		gl_FragColor = color;
+	", true)
 	@:glFragmentSource("#pragma header
 
 		void main(void) {

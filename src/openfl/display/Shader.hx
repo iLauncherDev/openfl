@@ -265,6 +265,8 @@ class Shader
 	**/
 	public var program:Program3D;
 
+	@:noCompletion private var __positionZ:ShaderParameter<Float>;
+	@:noCompletion private var __depthPass:ShaderParameter<Bool>;
 	@:noCompletion private var __alpha:ShaderParameter<Float>;
 	@:noCompletion private var __bitmap:ShaderInput<BitmapData>;
 	@:noCompletion private var __blendMode:ShaderParameter<Int>;
@@ -659,6 +661,24 @@ class Shader
 
 		if (isFragment) prefix += "#define ALPHA_EPSILON 1e-4\n";
 
+		if (isFragment)
+		{
+			prefix += "
+				#define ALPHA_THRESHOLD 0.00196
+				#define DEPTH_ALPHA_CHECK(alpha) 															\\
+					do																						\\
+					{																						\\\n";
+
+			prefix += "if (alpha <= ALPHA_THRESHOLD) discard;\\\n";
+
+			// if (isDepthPass)
+			// {
+			prefix += "if (openfl_IsDepthPass && (1.0 - (alpha)) >= ALPHA_THRESHOLD) discard;\\\n";
+			// }
+
+			prefix += "} while (false)\n";
+		}
+
 		return prefix;
 	}
 
@@ -918,9 +938,11 @@ class Shader
 						parameter.__length = length;
 						__paramBool.push(parameter);
 
-						if (name == "openfl_HasColorTransform")
+						switch (name)
 						{
-							__hasColorTransform = parameter;
+							case "openfl_IsDepthPass": __depthPass = parameter;
+							case "openfl_HasColorTransform": __hasColorTransform = parameter;
+							default:
 						}
 
 						Reflect.setField(__data, name, parameter);
@@ -978,6 +1000,7 @@ class Shader
 						{
 							switch (name)
 							{
+								case "openfl_PositionZ": __positionZ = parameter;
 								case "openfl_Alpha": __alpha = parameter;
 								case "openfl_ColorMultiplier": __colorMultiplier = parameter;
 								case "openfl_ColorOffset": __colorOffset = parameter;

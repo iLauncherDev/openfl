@@ -43,44 +43,56 @@ class DrawCommandReader
 			case BEGIN_BITMAP_FILL:
 				oPos += 2; // bitmap, matrix
 				bPos += 2; // repeat, smooth
+				fPos += 1; // zIndex
 
 			case BEGIN_FILL:
 				iPos += 1; // color
 				fPos += 1; // alpha
+				fPos += 1; // zIndex
 
 			case BEGIN_GRADIENT_FILL:
 				oPos += 4; // type, matrix, spreadMethod, interpolationMethod
 				iiPos += 2; // colors, ratios
 				ffPos += 1; // alphas
 				fPos += 1; // focalPointRatio
+				fPos += 1; // zIndex
 
 			case BEGIN_SHADER_FILL:
 				oPos += 1; // shaderBuffer
+				fPos += 1; // zIndex
 
 			case CUBIC_CURVE_TO:
 				fPos += 6; // controlX1, controlY1, controlX2, controlY2, anchorX, anchorY
+				fPos += 1; // zIndex
 
 			case CURVE_TO:
 				fPos += 4; // controlX, controlY, anchorX, anchorY
+				fPos += 1; // zIndex
 
 			case DRAW_CIRCLE:
 				fPos += 3; // x, y, radius
+				fPos += 1; // zIndex
 
 			case DRAW_ELLIPSE:
 				fPos += 4; // x, y, width, height
+				fPos += 1; // zIndex
 
 			case DRAW_QUADS:
 				oPos += 3; // rects, indices, transforms
+				fPos += 1; // zIndex
 
 			case DRAW_RECT:
 				fPos += 4; // x, y, width, height
+				fPos += 1; // zIndex
 
 			case DRAW_ROUND_RECT:
 				fPos += 5; // x, y, width, height, ellipseWidth
 				oPos += 1; // ellipseHeight
+				fPos += 1; // zIndex
 
 			case DRAW_TRIANGLES:
 				oPos += 4; // vertices, indices, uvtData, culling
+				fPos += 1; // zIndex
 
 			case END_FILL:
 				// no parameters
@@ -357,6 +369,13 @@ abstract BeginBitmapFillView(DrawCommandReader)
 	{
 		return this.bool(1);
 	}
+
+	public var zIndex(get, never):Float;
+
+	@:noCompletion private inline function get_zIndex():Float
+	{
+		return this.float(0);
+	}
 }
 
 abstract BeginFillView(DrawCommandReader)
@@ -378,6 +397,13 @@ abstract BeginFillView(DrawCommandReader)
 	@:noCompletion private inline function get_alpha():Float
 	{
 		return this.float(0);
+	}
+
+	public var zIndex(get, never):Float;
+
+	@:noCompletion private inline function get_zIndex():Float
+	{
+		return this.float(1);
 	}
 }
 
@@ -443,6 +469,13 @@ abstract BeginGradientFillView(DrawCommandReader)
 	{
 		return cast this.float(0);
 	}
+
+	public var zIndex(get, never):Float;
+
+	@:noCompletion private inline function get_zIndex():Float
+	{
+		return cast this.float(1);
+	}
 }
 
 abstract BeginShaderFillView(DrawCommandReader)
@@ -457,6 +490,13 @@ abstract BeginShaderFillView(DrawCommandReader)
 	@:noCompletion private inline function get_shaderBuffer():ShaderBuffer
 	{
 		return cast this.obj(0);
+	}
+
+	public var zIndex(get, never):Float;
+
+	@:noCompletion private inline function get_zIndex():Float
+	{
+		return cast this.float(0);
 	}
 }
 
@@ -508,6 +548,13 @@ abstract CubicCurveToView(DrawCommandReader)
 	{
 		return this.float(5);
 	}
+
+	public var zIndex(get, never):Float;
+
+	@:noCompletion private inline function get_zIndex():Float
+	{
+		return this.float(6);
+	}
 }
 
 abstract CurveToView(DrawCommandReader)
@@ -544,6 +591,13 @@ abstract CurveToView(DrawCommandReader)
 	{
 		return this.float(3);
 	}
+
+	public var zIndex(get, never):Float;
+
+	@:noCompletion private inline function get_zIndex():Float
+	{
+		return this.float(4);
+	}
 }
 
 abstract DrawCircleView(DrawCommandReader)
@@ -572,6 +626,13 @@ abstract DrawCircleView(DrawCommandReader)
 	@:noCompletion private inline function get_radius():Float
 	{
 		return this.float(2);
+	}
+
+	public var zIndex(get, never):Float;
+
+	@:noCompletion private inline function get_zIndex():Float
+	{
+		return this.float(3);
 	}
 }
 
@@ -609,6 +670,13 @@ abstract DrawEllipseView(DrawCommandReader)
 	{
 		return this.float(3);
 	}
+
+	public var zIndex(get, never):Float;
+
+	@:noCompletion private inline function get_zIndex():Float
+	{
+		return this.float(4);
+	}
 }
 
 abstract DrawQuadsView(DrawCommandReader)
@@ -637,6 +705,13 @@ abstract DrawQuadsView(DrawCommandReader)
 	@:noCompletion private inline function get_transforms():Vector<Float>
 	{
 		return cast this.obj(2);
+	}
+
+	public var zIndex(get, never):Float;
+
+	@:noCompletion private inline function get_zIndex():Float
+	{
+		return this.float(0);
 	}
 }
 
@@ -673,6 +748,13 @@ abstract DrawRectView(DrawCommandReader)
 	@:noCompletion private inline function get_height():Float
 	{
 		return this.float(3);
+	}
+
+	public var zIndex(get, never):Float;
+
+	@:noCompletion private inline function get_zIndex():Float
+	{
+		return this.float(4);
 	}
 }
 
@@ -724,6 +806,13 @@ abstract DrawRoundRectView(DrawCommandReader)
 	{
 		return this.obj(0);
 	}
+
+	public var zIndex(get, never):Float;
+
+	@:noCompletion private inline function get_zIndex():Float
+	{
+		return this.float(5);
+	}
 }
 
 abstract DrawTrianglesView(DrawCommandReader)
@@ -759,6 +848,13 @@ abstract DrawTrianglesView(DrawCommandReader)
 	@:noCompletion private inline function get_culling():TriangleCulling
 	{
 		return cast this.obj(3);
+	}
+
+	public var zIndex(get, never):Float;
+
+	@:noCompletion private inline function get_zIndex():Float
+	{
+		return this.float(0);
 	}
 }
 
