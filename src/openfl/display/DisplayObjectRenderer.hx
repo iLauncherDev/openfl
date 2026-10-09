@@ -8,6 +8,7 @@ import openfl.display.Bitmap;
 import openfl.display.DisplayObject;
 import openfl.display.Tilemap;
 import openfl.display._internal.Context3DGraphics;
+import openfl.display3D.Context3DCompareMode;
 import openfl.display3D.Context3D;
 import openfl.display3D.textures.MultiBufferTexture;
 import openfl.events.EventDispatcher;
@@ -957,6 +958,9 @@ class DisplayObjectRenderer extends EventDispatcher
 						childRenderer.__worldTransform.identity();
 						childRenderer.__worldColorTransform.__identity();
 
+						childRenderer.setGLDepthTest(false, Context3DCompareMode.ALWAYS);
+						context.__flushGLDepth();
+
 						// var sourceRect = bitmap.rect;
 						// if (__tempPoint == null) __tempPoint = new Point ();
 						// var destPoint = __tempPoint;
@@ -965,6 +969,8 @@ class DisplayObjectRenderer extends EventDispatcher
 
 						for (filter in displayObject.__filters)
 						{
+							continue;
+
 							if (filter.__preserveObject)
 							{
 								childRenderer.__setRenderTarget(bitmap3);

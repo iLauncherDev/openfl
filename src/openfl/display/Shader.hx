@@ -265,6 +265,10 @@ class Shader
 	**/
 	public var program:Program3D;
 
+	public var program_depth:Program3D;
+
+	public var current_program:Program3D;
+
 	@:noCompletion private var __positionZ:ShaderParameter<Float>;
 	@:noCompletion private var __depthPass:ShaderParameter<Bool>;
 	@:noCompletion private var __alpha:ShaderParameter<Float>;
@@ -603,7 +607,7 @@ class Shader
 		return outputs;
 	}
 
-	@:noCompletion private function __buildSourcePrefix(isFragment:Bool, gles3:Bool = false):String
+	@:noCompletion private function __buildSourcePrefix(isFragment:Bool, gles3:Bool = false, isDepthPass:Bool = false):String
 	{
 		var extensions = "";
 
@@ -669,12 +673,10 @@ class Shader
 					do																						\\
 					{																						\\\n";
 
-			prefix += "if (alpha <= ALPHA_THRESHOLD) discard;\\\n";
-
-			// if (isDepthPass)
-			// {
-			prefix += "if (openfl_IsDepthPass && (1.0 - (alpha)) >= ALPHA_THRESHOLD) discard;\\\n";
-			// }
+			if (isDepthPass)
+			{
+				prefix += "if (openfl_IsDepthPass && (alpha) < 1.0) discard;\\\n";
+			}
 
 			prefix += "} while (false)\n";
 		}
@@ -688,6 +690,8 @@ class Shader
 		{
 			__glSourceDirty = false;
 			program = null;
+			program_depth = null;
+			current_program = null;
 
 			__inputBitmapData = new Array();
 			__paramBool = new Array();
@@ -700,7 +704,7 @@ class Shader
 			__processGLData(glFragmentSource, "uniform");
 		}
 
-		if (__context != null && program == null)
+		if (__context != null && program == null && program_depth == null)
 		{
 			var gl = __context.gl;
 
@@ -718,7 +722,22 @@ class Shader
 				fragment = __buildSourcePrefix(true) + glFragmentSource;
 			}
 
+			var vertex_depth:String;
+			var fragment_depth:String;
+
+			if (__needsGLES3Source(glFragmentSource))
+			{
+				vertex_depth = __buildSourcePrefix(false, true, true) + __convertGLES3Source(glVertexSource, false);
+				fragment_depth = __buildSourcePrefix(true, true, true) + __buildGLES3Outputs(glFragmentSource) + __convertGLES3Source(glFragmentSource, true);
+			}
+			else
+			{
+				vertex_depth = __buildSourcePrefix(false, false, true) + glVertexSource;
+				fragment_depth = __buildSourcePrefix(true, false, true) + glFragmentSource;
+			}
+
 			var id = vertex + fragment;
+			var id_depth = vertex_depth + fragment_depth;
 
 			if (__context.__programs.exists(id))
 			{
@@ -762,56 +781,97 @@ class Shader
 				__context.__programs.set(id, program);
 			}
 
-			if (program != null)
+			if (__context.__programs.exists(id_depth))
 			{
-				glProgram = program.__glProgram;
+				program_depth = __context.__programs.get(id_depth);
+			}
+			else
+			{
+				program_depth = __context.createProgram(GLSL);
 
-				for (input in __inputBitmapData)
+				// TODO
+				// program.uploadSources (vertex, fragment);
+
+				if (Lib.current.stage.__uncaughtErrorEvents.__enabled)
 				{
-					if (input.__isUniform)
+					try
 					{
-						input.index = gl.getUniformLocation(glProgram, input.name);
+						program_depth.__glProgram = __createGLProgram(vertex_depth, fragment_depth);
 					}
-					else
+					catch (e:Dynamic)
 					{
-						input.index = gl.getAttribLocation(glProgram, input.name);
+						Lib.current.stage.__handleError(e);
+
+						program_depth.__glProgram = null;
 					}
 				}
+				else
+					program_depth.__glProgram = __createGLProgram(vertex_depth, fragment_depth);
 
-				for (parameter in __paramBool)
+				__context.__programs.set(id_depth, program_depth);
+			}
+
+			setShaderDepthMode(false);
+		}
+	}
+
+	public function setShaderDepthMode(isDepthPass:Bool):Void
+	{
+		if (__context == null) return;
+
+		var gl = __context.gl;
+
+		var selected_program = isDepthPass ? program_depth : program;
+		if (selected_program != null)
+		{
+			current_program = selected_program;
+			glProgram = selected_program.__glProgram;
+
+			for (input in __inputBitmapData)
+			{
+				if (input.__isUniform)
 				{
-					if (parameter.__isUniform)
-					{
-						parameter.index = gl.getUniformLocation(glProgram, parameter.name);
-					}
-					else
-					{
-						parameter.index = gl.getAttribLocation(glProgram, parameter.name);
-					}
+					input.index = gl.getUniformLocation(glProgram, input.name);
 				}
-
-				for (parameter in __paramFloat)
+				else
 				{
-					if (parameter.__isUniform)
-					{
-						parameter.index = gl.getUniformLocation(glProgram, parameter.name);
-					}
-					else
-					{
-						parameter.index = gl.getAttribLocation(glProgram, parameter.name);
-					}
+					input.index = gl.getAttribLocation(glProgram, input.name);
 				}
+			}
 
-				for (parameter in __paramInt)
+			for (parameter in __paramBool)
+			{
+				if (parameter.__isUniform)
 				{
-					if (parameter.__isUniform)
-					{
-						parameter.index = gl.getUniformLocation(glProgram, parameter.name);
-					}
-					else
-					{
-						parameter.index = gl.getAttribLocation(glProgram, parameter.name);
-					}
+					parameter.index = gl.getUniformLocation(glProgram, parameter.name);
+				}
+				else
+				{
+					parameter.index = gl.getAttribLocation(glProgram, parameter.name);
+				}
+			}
+
+			for (parameter in __paramFloat)
+			{
+				if (parameter.__isUniform)
+				{
+					parameter.index = gl.getUniformLocation(glProgram, parameter.name);
+				}
+				else
+				{
+					parameter.index = gl.getAttribLocation(glProgram, parameter.name);
+				}
+			}
+
+			for (parameter in __paramInt)
+			{
+				if (parameter.__isUniform)
+				{
+					parameter.index = gl.getUniformLocation(glProgram, parameter.name);
+				}
+				else
+				{
+					parameter.index = gl.getAttribLocation(glProgram, parameter.name);
 				}
 			}
 		}

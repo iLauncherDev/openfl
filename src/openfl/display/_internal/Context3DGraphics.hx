@@ -1430,7 +1430,7 @@ class Context3DGraphics
 
 				inline function setup_depth_stuff():Bool
 				{
-					var zOffset:Float = !depthPass ? 0.5 : 0.0;
+					var zOffset:Float = depthPass ? 0.5 : 0.0;
 
 					if (!renderer.applyPositionZ(1.0 - ((currentZ + zOffset) / maxZ)) && depthPass) return false;
 					if (!renderer.applyDepthPassCondition(depthPass) && depthPass) return false;
@@ -1467,7 +1467,7 @@ class Context3DGraphics
 						{
 							shader = renderer.__initShaderBuffer(shaderBuffer);
 
-							renderer.__setShaderBuffer(shaderBuffer);
+							renderer.__setShaderBuffer(shaderBuffer, depthPass);
 							depth_result = setup_depth_stuff();
 							renderer.applyMatrix(uMatrix);
 							renderer.applyBitmapData(bitmap, false, repeat);
@@ -1478,7 +1478,7 @@ class Context3DGraphics
 						else if (bitmap != null)
 						{
 							shader = maskRender ? renderer.__maskShader : renderer.__initGraphicsShader(null);
-							renderer.setShader(shader);
+							renderer.setShader(shader, depthPass);
 							depth_result = setup_depth_stuff();
 							renderer.applyMatrix(uMatrix);
 							renderer.applyBitmapData(bitmap, smooth, repeat);
@@ -1489,7 +1489,7 @@ class Context3DGraphics
 						else
 						{
 							shader = maskRender ? renderer.__maskShader : renderer.__initGraphicsShader(null);
-							renderer.setShader(shader);
+							renderer.setShader(shader, depthPass);
 							depth_result = setup_depth_stuff();
 							renderer.applyMatrix(uMatrix);
 							renderer.applyBitmapData(blankBitmapData, true, repeat);
@@ -1989,6 +1989,9 @@ class Context3DGraphics
 
 				renderer.clearDepthBuffer();
 				render_pass(true);
+				render_pass(false);
+
+				renderer.setGLBlend(true);
 
 				releaseDrawCommandBuffer(reversedCommands);
 				releaseDrawCommandBuffer(forwardCommands);
