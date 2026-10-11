@@ -269,7 +269,6 @@ class Shader
 
 	public var current_program:Program3D;
 
-	@:noCompletion private var __positionZ:ShaderParameter<Float>;
 	@:noCompletion private var __depthPass:ShaderParameter<Bool>;
 	@:noCompletion private var __alpha:ShaderParameter<Float>;
 	@:noCompletion private var __bitmap:ShaderInput<BitmapData>;
@@ -665,20 +664,9 @@ class Shader
 
 		if (isFragment) prefix += "#define ALPHA_EPSILON 1e-4\n";
 
-		if (isFragment)
+		if (isFragment && isDepthPass)
 		{
-			prefix += "
-				#define ALPHA_THRESHOLD 0.00196
-				#define DEPTH_ALPHA_CHECK(alpha) 															\\
-					do																						\\
-					{																						\\\n";
-
-			if (isDepthPass)
-			{
-				prefix += "if (openfl_IsDepthPass && (alpha) < 1.0) discard;\\\n";
-			}
-
-			prefix += "} while (false)\n";
+			prefix += "#define IS_DEPTH_PASS\n";
 		}
 
 		return prefix;
@@ -1060,7 +1048,6 @@ class Shader
 						{
 							switch (name)
 							{
-								case "openfl_PositionZ": __positionZ = parameter;
 								case "openfl_Alpha": __alpha = parameter;
 								case "openfl_ColorMultiplier": __colorMultiplier = parameter;
 								case "openfl_ColorOffset": __colorOffset = parameter;

@@ -876,8 +876,7 @@ class DisplayObjectRenderer extends EventDispatcher
 						displayObject.__cacheBitmapData.__textureVersion = displayObject.__cacheBitmapData.image.version
 						+ 1;
 
-					var hasBuffers = displayObject.__cacheBitmapData.__extraBufferFormats != null
-						&& displayObject.__cacheBitmapData.__extraBufferFormats.length > 0;
+					var hasBuffers = false;
 					displayObject.__cacheBitmapData.__drawGL(displayObject, childRenderer, !hasBuffers);
 
 					if (hasBuffers) __updateBufferFilters(displayObject, childRenderer, filterWidth, filterHeight);

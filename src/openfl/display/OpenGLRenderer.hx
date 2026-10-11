@@ -57,7 +57,6 @@ class OpenGLRenderer extends DisplayObjectRenderer
 	@:noCompletion private static var __drawBuffersARB:Null<Bool>;
 	@:noCompletion private static var __drawBuffersWEBGL:Null<Bool>;
 
-	@:noCompletion private static var __positionZ:Array<Float> = [0];
 	@:noCompletion private static var __depthPass:Array<Bool> = [false];
 	@:noCompletion private static var __alphaValue:Array<Float> = [1];
 	@:noCompletion private static var __colorMultipliersValue:Array<Float> = [0, 0, 0, 0];
@@ -267,35 +266,19 @@ class OpenGLRenderer extends DisplayObjectRenderer
 
 		if (__currentShaderBuffer != null)
 		{
-			__currentShaderBuffer.addBoolOverride("openfl_IsDepthPass", __depthPass);
-			return true;
-		}
-		else if (__currentShader != null)
-		{
-			if (__currentShader.__depthPass != null)
+			if (__currentShaderBuffer.shader != null
+				&& __currentShaderBuffer.shader.__depthPass != null
+				&& __currentShaderBuffer.shader.__depthPass.index != -1)
 			{
-				__currentShader.__depthPass.value = __depthPass;
+				__currentShaderBuffer.addBoolOverride("openfl_IsDepthPass", __depthPass);
 				return true;
 			}
 		}
-
-		return false;
-	}
-
-	public function applyPositionZ(positionZ:Float):Bool
-	{
-		__positionZ[0] = positionZ;
-
-		if (__currentShaderBuffer != null)
-		{
-			__currentShaderBuffer.addFloatOverride("openfl_PositionZ", __positionZ);
-			return true;
-		}
 		else if (__currentShader != null)
 		{
-			if (__currentShader.__positionZ != null)
+			if (__currentShader.__depthPass != null && __currentShader.__depthPass.index != -1)
 			{
-				__currentShader.__positionZ.value = __positionZ;
+				__currentShader.__depthPass.value = __depthPass;
 				return true;
 			}
 		}

@@ -78,10 +78,6 @@ class Context3DState
 
 	public function new()
 	{
-		backBufferEnableDepthAndStencil = true;
-		renderToTextureDepthStencil = true;
-
-		backBufferEnableDepthAndStencil = false;
 		blendDestinationAlphaFactor = ZERO;
 		blendSourceAlphaFactor = ONE;
 		blendDestinationRGBFactor = ZERO;

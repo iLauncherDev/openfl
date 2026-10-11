@@ -30,10 +30,7 @@ class GraphicsShader extends Shader
 
 		}
 
-		vec4 out_position = openfl_Matrix * openfl_Position;
-		out_position.z = openfl_PositionZ;
-
-		gl_Position = out_position;")
+		gl_Position = openfl_Matrix * openfl_Position;")
 	@:glVertexSource("#pragma header
 
 		void main(void) {
@@ -46,7 +43,17 @@ class GraphicsShader extends Shader
 		varying vec4 openfl_ColorOffsetv;
 		varying vec2 openfl_TextureCoordv;
 
-		uniform bool openfl_IsDepthPass;
+		#if !defined DEPTH_PASS_SUPPORTED || !defined IS_DEPTH_PASS
+			#define DEPTH_ALPHA_CHECK(alpha)
+		#else
+			uniform bool openfl_IsDepthPass;
+
+			#define DEPTH_ALPHA_CHECK(alpha) 															\\
+				do																						\\
+				{																						\\
+					if (openfl_IsDepthPass && (1.0 - (alpha)) >= ALPHA_EPSILON) discard;				\\
+				} while (false)
+		#endif
 
 		uniform bool openfl_HasColorTransform;
 		uniform vec2 openfl_TextureSize;

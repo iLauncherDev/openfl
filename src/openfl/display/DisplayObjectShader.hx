@@ -30,10 +30,7 @@ class DisplayObjectShader extends Shader
 
 		}
 
-		vec4 out_position = openfl_Matrix * openfl_Position;
-		out_position.z = openfl_PositionZ;
-
-		gl_Position = out_position;")
+		gl_Position = openfl_Matrix * openfl_Position;")
 	@:glVertexSource("#pragma header
 
 		void main(void) {
@@ -46,14 +43,10 @@ class DisplayObjectShader extends Shader
 		varying vec4 openfl_ColorOffsetv;
 		varying vec2 openfl_TextureCoordv;
 
-		uniform bool openfl_IsDepthPass;
-
 		uniform bool openfl_HasColorTransform;
 		uniform sampler2D openfl_Texture;
 		uniform vec2 openfl_TextureSize;")
 	@:glFragmentBody("vec4 color = texture2D (openfl_Texture, openfl_TextureCoordv);
-
-		DEPTH_ALPHA_CHECK(color.a * openfl_Alphav);
 
 		if (openfl_HasColorTransform) {
 

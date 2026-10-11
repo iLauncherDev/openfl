@@ -33,6 +33,9 @@ import openfl.display._internal.stats.DrawCallContext;
 @SuppressWarnings("checkstyle:FieldDocComment")
 class Context3DGraphics
 {
+	@:noCompletion private static var NEAR_Z = -1000;
+	@:noCompletion private static var FAR_Z = 1000;
+
 	@:noCompletion private static var blankBitmapData = new BitmapData(1, 1, false, 0);
 
 	public static inline function getBlankBitmapData():BitmapData
@@ -76,7 +79,7 @@ class Context3DGraphics
 		var valid = true;
 		var result = getPooledDrawCommandBuffer();
 
-		var zIndex = 0;
+		var zIndex:Float = 0;
 
 		function copyCommand(command:DrawCommandBuffer, type:DrawCommandType):Bool
 		{
@@ -117,7 +120,15 @@ class Context3DGraphics
 
 				case DRAW_QUADS:
 					var c = data.readDrawQuads();
-					command.drawQuads(c.rects, c.indices, c.transforms, zIndex++);
+					var rects = c.rects;
+					var indices = c.indices;
+					var transforms = c.transforms;
+
+					var hasIndices = (indices != null);
+					var length = hasIndices ? indices.length : Math.floor(rects.length / 4);
+
+					command.drawQuads(c.rects, c.indices, c.transforms, zIndex);
+					zIndex += length;
 
 				case DRAW_RECT:
 					var c = data.readDrawRect();
@@ -129,7 +140,15 @@ class Context3DGraphics
 
 				case DRAW_TRIANGLES:
 					var c = data.readDrawTriangles();
-					command.drawTriangles(c.vertices, c.indices, c.uvtData, c.culling, zIndex++);
+					var vertices = c.vertices;
+					var indices = c.indices;
+
+					var hasIndices = (indices != null);
+					var numVertices:Float = Math.floor(vertices.length / 2);
+					var length:Float = Math.ceil((hasIndices ? indices.length : numVertices) / 3);
+
+					command.drawTriangles(c.vertices, c.indices, c.uvtData, c.culling, zIndex);
+					zIndex += length;
 
 				case LINE_STYLE:
 					var c = data.readLineStyle();
@@ -533,6 +552,7 @@ class Context3DGraphics
 
 		var bitmap:BitmapData = null;
 		var bitmapMatrix:Matrix = null;
+		var lineZIndex:Float = 0;
 		var linePathVertices = tempLinePathVertices;
 		var reducedLinePathVertices = tempLinePathReducedVertices;
 		var linePathMoveCount = 0;
@@ -547,7 +567,8 @@ class Context3DGraphics
 			scale9Grid = null;
 		}
 
-		inline function buildDrawTrianglesBuffer(vertices:Vector<Float>, indices:Vector<Int>, uvtData:Vector<Float>, culling:TriangleCulling):Void
+		inline function buildDrawTrianglesBuffer(vertices:Vector<Float>, indices:Vector<Int>, uvtData:Vector<Float>, culling:TriangleCulling, zIndex:Float,
+				moveZ:Bool):Void
 		{
 			if (hasScale9Grid)
 			{
@@ -592,7 +613,7 @@ class Context3DGraphics
 
 			var hasUVData = (uvtData != null);
 			var hasUVTData = (hasUVData && uvtData.length >= (numVertices * 3));
-			var vertLength = hasUVTData ? 4 : 2;
+			var vertLength = 4;
 			var uvStride = hasUVTData ? 3 : 2;
 
 			var dataPerVertex = vertLength + 2;
@@ -618,19 +639,24 @@ class Context3DGraphics
 
 				// if (hasIndices) indexBufferData[triangleIndexBufferPosition + i] = indices[i];
 
+				var zBatchOffset = moveZ ? Math.floor(i / 3) : 0;
+				var zOffset = NEAR_Z + (zIndex + zBatchOffset + 1);
+
 				if (hasUVTData)
 				{
 					t = uvtData[uvOffset + 2];
 
 					vertexBufferData[offset + 0] = vertices[vertOffset] / t;
 					vertexBufferData[offset + 1] = vertices[vertOffset + 1] / t;
-					vertexBufferData[offset + 2] = 0;
+					vertexBufferData[offset + 2] = zOffset / t;
 					vertexBufferData[offset + 3] = 1 / t;
 				}
 				else
 				{
 					vertexBufferData[offset + 0] = vertices[vertOffset];
 					vertexBufferData[offset + 1] = vertices[vertOffset + 1];
+					vertexBufferData[offset + 2] = zOffset;
+					vertexBufferData[offset + 3] = 1;
 				}
 
 				vertexBufferData[offset + vertLength] = hasUVData ? uvtData[uvOffset] : 0;
@@ -666,10 +692,11 @@ class Context3DGraphics
 
 					var uvtData = tempUvtVector;
 					populateBitmapUvtVector(reducedLinePathVertices, bitmap, bitmapMatrix, uvtData);
-					buildDrawTrianglesBuffer(reducedLinePathVertices, tempIndicesVector, uvtData, NONE);
+					buildDrawTrianglesBuffer(reducedLinePathVertices, tempIndicesVector, uvtData, NONE, lineZIndex, false);
 				}
 			}
 
+			lineZIndex = 0;
 			linePathVertices.length = 0;
 			reducedLinePathVertices.length = 0;
 			linePathMoveCount = 0;
@@ -684,7 +711,7 @@ class Context3DGraphics
 				var part = graphics.__tessellatedFillParts[i];
 				bitmap = part.bitmap;
 				bitmapMatrix = part.bitmapMatrix;
-				buildDrawTrianglesBuffer(part.vertices, part.indices, part.uvtData, NONE);
+				buildDrawTrianglesBuffer(part.vertices, part.indices, part.uvtData, NONE, 0, false);
 			}
 		}
 		else
@@ -699,17 +726,20 @@ class Context3DGraphics
 						var c = data.readBeginBitmapFill();
 						bitmap = c.bitmap;
 						bitmapMatrix = c.matrix;
+						lineZIndex = c.zIndex;
 
 					case BEGIN_GRADIENT_FILL:
 						flushBitmapLinePath();
 						bitmap = null;
 						bitmapMatrix = null;
+						lineZIndex = 0;
 						data.skip(type);
 
 					case BEGIN_FILL:
 						flushBitmapLinePath();
 						bitmap = null;
 						bitmapMatrix = null;
+						lineZIndex = 0;
 						data.skip(type);
 
 					case BEGIN_SHADER_FILL:
@@ -719,6 +749,7 @@ class Context3DGraphics
 
 						bitmap = null;
 						bitmapMatrix = null;
+						lineZIndex = c.zIndex;
 
 						if (shaderBuffer != null)
 						{
@@ -768,7 +799,7 @@ class Context3DGraphics
 							}
 						}
 
-						var dataPerVertex = 4;
+						var dataPerVertex = 6;
 						var stride = dataPerVertex * 4;
 
 						var quadBuffer = depthBuffer ? graphics.__quadBufferDepth : graphics.__quadBuffer;
@@ -817,6 +848,20 @@ class Context3DGraphics
 						for (i in 0...length)
 						{
 							vertexOffset = (quadBufferPosition + i) * stride;
+
+							var zOffset = NEAR_Z + (c.zIndex + i + 1);
+
+							vertexBufferData[vertexOffset + 2] = zOffset;
+							vertexBufferData[vertexOffset + 3] = 1;
+
+							vertexBufferData[vertexOffset + dataPerVertex + 2] = zOffset;
+							vertexBufferData[vertexOffset + dataPerVertex + 3] = 1;
+
+							vertexBufferData[vertexOffset + (dataPerVertex * 2) + 2] = zOffset;
+							vertexBufferData[vertexOffset + (dataPerVertex * 2) + 3] = 1;
+
+							vertexBufferData[vertexOffset + (dataPerVertex * 3) + 2] = zOffset;
+							vertexBufferData[vertexOffset + (dataPerVertex * 3) + 3] = 1;
 
 							ri = (hasIndices ? (indices[i] * 4) : i * 4);
 							if (ri < 0) continue;
@@ -869,23 +914,23 @@ class Context3DGraphics
 
 							vertexBufferData[vertexOffset + 0] = x;
 							vertexBufferData[vertexOffset + 1] = y;
-							vertexBufferData[vertexOffset + 2] = uvX;
-							vertexBufferData[vertexOffset + 3] = uvY;
+							vertexBufferData[vertexOffset + 4] = uvX;
+							vertexBufferData[vertexOffset + 5] = uvY;
 
 							vertexBufferData[vertexOffset + dataPerVertex + 0] = x2;
 							vertexBufferData[vertexOffset + dataPerVertex + 1] = y2;
-							vertexBufferData[vertexOffset + dataPerVertex + 2] = uvWidth;
-							vertexBufferData[vertexOffset + dataPerVertex + 3] = uvY;
+							vertexBufferData[vertexOffset + dataPerVertex + 4] = uvWidth;
+							vertexBufferData[vertexOffset + dataPerVertex + 5] = uvY;
 
 							vertexBufferData[vertexOffset + (dataPerVertex * 2) + 0] = x3;
 							vertexBufferData[vertexOffset + (dataPerVertex * 2) + 1] = y3;
-							vertexBufferData[vertexOffset + (dataPerVertex * 2) + 2] = uvX;
-							vertexBufferData[vertexOffset + (dataPerVertex * 2) + 3] = uvHeight;
+							vertexBufferData[vertexOffset + (dataPerVertex * 2) + 4] = uvX;
+							vertexBufferData[vertexOffset + (dataPerVertex * 2) + 5] = uvHeight;
 
 							vertexBufferData[vertexOffset + (dataPerVertex * 3) + 0] = x4;
 							vertexBufferData[vertexOffset + (dataPerVertex * 3) + 1] = y4;
-							vertexBufferData[vertexOffset + (dataPerVertex * 3) + 2] = uvWidth;
-							vertexBufferData[vertexOffset + (dataPerVertex * 3) + 3] = uvHeight;
+							vertexBufferData[vertexOffset + (dataPerVertex * 3) + 4] = uvWidth;
+							vertexBufferData[vertexOffset + (dataPerVertex * 3) + 5] = uvHeight;
 						}
 
 						quadBufferPosition += length;
@@ -897,7 +942,7 @@ class Context3DGraphics
 						var indices = c.indices;
 						var uvtData = c.uvtData;
 						var culling = c.culling;
-						buildDrawTrianglesBuffer(vertices, indices, uvtData, culling);
+						buildDrawTrianglesBuffer(vertices, indices, uvtData, culling, c.zIndex, true);
 
 					case DRAW_CIRCLE:
 						flushBitmapLinePath();
@@ -911,7 +956,7 @@ class Context3DGraphics
 
 						PolygonFunctions.buildEllipseVerticesAndIndices(x - radius, y - radius, radius, radius, scaleX, scaleY, tempVerticesVector,
 							tempIndicesVector);
-						buildDrawTrianglesBuffer(tempVerticesVector, tempIndicesVector, null, NONE);
+						buildDrawTrianglesBuffer(tempVerticesVector, tempIndicesVector, null, NONE, c.zIndex, false);
 
 					case DRAW_ELLIPSE:
 						flushBitmapLinePath();
@@ -925,7 +970,7 @@ class Context3DGraphics
 						var scaleY = graphics.__owner.scaleY;
 
 						PolygonFunctions.buildEllipseVerticesAndIndices(x, y, radiusX, radiusY, scaleX, scaleY, tempVerticesVector, tempIndicesVector);
-						buildDrawTrianglesBuffer(tempVerticesVector, tempIndicesVector, null, NONE);
+						buildDrawTrianglesBuffer(tempVerticesVector, tempIndicesVector, null, NONE, c.zIndex, false);
 
 					case DRAW_ROUND_RECT:
 						flushBitmapLinePath();
@@ -946,33 +991,30 @@ class Context3DGraphics
 
 						PolygonFunctions.buildRoundRectVerticesAndIndices(x, y, width, height, radiusX, radiusY, scaleX, scaleY, tempVerticesVector,
 							tempIndicesVector);
-						buildDrawTrianglesBuffer(tempVerticesVector, tempIndicesVector, null, NONE);
+						buildDrawTrianglesBuffer(tempVerticesVector, tempIndicesVector, null, NONE, c.zIndex, false);
 
 					case DRAW_RECT:
 						flushBitmapLinePath();
-						if (bitmap != null)
-						{
-							var c = data.readDrawRect();
+						var c = data.readDrawRect();
 
-							tempVerticesVector.length = 8;
-							tempVerticesVector[0] = c.x;
-							tempVerticesVector[1] = c.y;
-							tempVerticesVector[2] = c.x + c.width;
-							tempVerticesVector[3] = c.y;
-							tempVerticesVector[4] = c.x;
-							tempVerticesVector[5] = c.y + c.height;
-							tempVerticesVector[6] = c.x + c.width;
-							tempVerticesVector[7] = c.y + c.height;
-							tempIndicesVector.length = 6;
-							tempIndicesVector[0] = 0;
-							tempIndicesVector[1] = 1;
-							tempIndicesVector[2] = 2;
-							tempIndicesVector[3] = 1;
-							tempIndicesVector[4] = 2;
-							tempIndicesVector[5] = 3;
+						tempVerticesVector.length = 8;
+						tempVerticesVector[0] = c.x;
+						tempVerticesVector[1] = c.y;
+						tempVerticesVector[2] = c.x + c.width;
+						tempVerticesVector[3] = c.y;
+						tempVerticesVector[4] = c.x;
+						tempVerticesVector[5] = c.y + c.height;
+						tempVerticesVector[6] = c.x + c.width;
+						tempVerticesVector[7] = c.y + c.height;
+						tempIndicesVector.length = 6;
+						tempIndicesVector[0] = 0;
+						tempIndicesVector[1] = 1;
+						tempIndicesVector[2] = 2;
+						tempIndicesVector[3] = 1;
+						tempIndicesVector[4] = 2;
+						tempIndicesVector[5] = 3;
 
-							buildDrawTrianglesBuffer(tempVerticesVector, tempIndicesVector, null, NONE);
-						}
+						buildDrawTrianglesBuffer(tempVerticesVector, tempIndicesVector, null, NONE, c.zIndex, false);
 
 					case MOVE_TO:
 						var c = data.readMoveTo();
@@ -1035,7 +1077,7 @@ class Context3DGraphics
 
 			if (buffer == null || vertexBufferPosition > bufferCount)
 			{
-				buffer = context.createVertexBuffer(vertexBufferPosition, 4, DYNAMIC_DRAW);
+				buffer = context.createVertexBuffer(vertexBufferPosition, 6, DYNAMIC_DRAW);
 				if (depthBuffer)
 				{
 					graphics.__vertexBufferDepth = buffer;
@@ -1461,14 +1503,8 @@ class Context3DGraphics
 
 				var depthPass:Bool = false;
 
-				var currentZ:Float = 0;
-				var maxZ:Float = 32768;
-
 				inline function setup_depth_stuff():Bool
 				{
-					var zOffset:Float = depthPass ? 0.5 : 0.0;
-
-					if (!renderer.applyPositionZ(1.0 - ((currentZ + zOffset) / maxZ)) && depthPass) return false;
 					if (!renderer.applyDepthPassCondition(depthPass) && depthPass) return false;
 
 					return true;
@@ -1489,7 +1525,7 @@ class Context3DGraphics
 						var length = indicesLength > 0 ? indicesLength : numVertices;
 
 						var hasUVTData = uvDataLength >= (numVertices * 3);
-						var vertLength = hasUVTData ? 4 : 2;
+						var vertLength = 4;
 						var uvStride = hasUVTData ? 3 : 2;
 
 						var dataPerVertex = vertLength + 2;
@@ -1545,8 +1581,7 @@ class Context3DGraphics
 							renderer.updateShader();
 						}
 
-						if (shader.__position != null) context.setVertexBufferAt(shader.__position.index, vertexBuffer, bufferPosition,
-							hasUVTData ? FLOAT_4 : FLOAT_2);
+						if (shader.__position != null) context.setVertexBufferAt(shader.__position.index, vertexBuffer, bufferPosition, FLOAT_4);
 						if (shader.__textureCoord != null) context.setVertexBufferAt(shader.__textureCoord.index, vertexBuffer, bufferPosition + vertLength,
 							FLOAT_2);
 
@@ -1691,8 +1726,6 @@ class Context3DGraphics
 						renderer.setGLBlend(true);
 					}
 
-					renderer.setGLDepthTest(true, Context3DCompareMode.LESS_EQUAL);
-
 					for (type in passCommands.types)
 					{
 						var depth_result:Bool = true;
@@ -1702,7 +1735,6 @@ class Context3DGraphics
 							case BEGIN_BITMAP_FILL:
 								flushBitmapLinePath();
 								var c = data.readBeginBitmapFill();
-								currentZ = c.zIndex;
 								bitmap = c.bitmap;
 								bitmapMatrix = c.matrix;
 								repeat = c.repeat;
@@ -1716,7 +1748,6 @@ class Context3DGraphics
 								// the previous fill either.
 								data.skip(type);
 
-								currentZ = 0;
 								fill = 0x00000000;
 								shaderBuffer = null;
 								bitmap = null;
@@ -1728,7 +1759,6 @@ class Context3DGraphics
 								var color = Std.int(c.color);
 								var alpha = Std.int(c.alpha * 0xFF);
 
-								currentZ = c.zIndex;
 								fill = (color & 0xFFFFFF) | (alpha << 24);
 								shaderBuffer = null;
 								bitmap = null;
@@ -1738,7 +1768,6 @@ class Context3DGraphics
 								flushBitmapLinePath();
 								var c = data.readBeginShaderFill();
 
-								currentZ = c.zIndex;
 								shaderBuffer = c.shaderBuffer;
 								shaderBufferOffset = 0;
 
@@ -1757,8 +1786,6 @@ class Context3DGraphics
 							case DRAW_QUADS:
 								flushBitmapLinePath();
 								var c = data.readDrawQuads();
-
-								currentZ = c.zIndex;
 
 								if (bitmap != null || fill != null)
 								{
@@ -1826,6 +1853,9 @@ class Context3DGraphics
 
 									var end = quadBufferPosition + length;
 
+									var dataPerVertex = 6;
+									var stride = dataPerVertex * 4;
+
 									while (quadBufferPosition < end)
 									{
 										length = Std.int(Math.min(end - quadBufferPosition, context.__quadIndexBufferElements));
@@ -1838,9 +1868,9 @@ class Context3DGraphics
 
 										var quadBuffer = depthPass ? graphics.__quadBufferDepth : graphics.__quadBuffer;
 										if (shader.__position != null) context.setVertexBufferAt(shader.__position.index, quadBuffer.vertexBuffer,
-											quadBufferPosition * 16, FLOAT_2);
+											quadBufferPosition * stride, FLOAT_4);
 										if (shader.__textureCoord != null) context.setVertexBufferAt(shader.__textureCoord.index, quadBuffer.vertexBuffer,
-											(quadBufferPosition * 16) + 2, FLOAT_2);
+											(quadBufferPosition * stride) + 4, FLOAT_2);
 
 										if (depth_result) context.drawTriangles(context.__quadIndexBuffer, 0, length * 2);
 
@@ -1861,8 +1891,6 @@ class Context3DGraphics
 
 								var numVertices = PolygonFunctions.getEllipseNumVertices(radius, radius);
 
-								currentZ = c.zIndex;
-
 								renderDrawTriangles(numVertices * 2, (numVertices - 2) * 3, 0, NONE);
 
 							case DRAW_ELLIPSE:
@@ -1875,8 +1903,6 @@ class Context3DGraphics
 								var scaleY = graphics.__owner.scaleY;
 
 								var numVertices = PolygonFunctions.getEllipseNumVertices(radiusX * scaleX, radiusY * scaleY);
-
-								currentZ = c.zIndex;
 
 								renderDrawTriangles(numVertices * 2, (numVertices - 2) * 3, 0, NONE);
 
@@ -1895,15 +1921,11 @@ class Context3DGraphics
 
 								var numVertices = PolygonFunctions.getRoundRectNumVertices(radiusX * scaleX, radiusY * scaleY);
 
-								currentZ = c.zIndex;
-
 								renderDrawTriangles(numVertices * 2, (numVertices - 2) * 3, 0, NONE);
 
 							case DRAW_RECT:
 								flushBitmapLinePath();
 								var c = data.readDrawRect();
-
-								currentZ = c.zIndex;
 
 								if (bitmap != null)
 								{
@@ -1958,8 +1980,8 @@ class Context3DGraphics
 									renderer.updateShader();
 
 									var vertexBuffer = blankBitmapData.getVertexBuffer(context);
-									if (shader.__position != null) context.setVertexBufferAt(shader.__position.index, vertexBuffer, 0, FLOAT_3);
-									if (shader.__textureCoord != null) context.setVertexBufferAt(shader.__textureCoord.index, vertexBuffer, 3, FLOAT_2);
+									if (shader.__position != null) context.setVertexBufferAt(shader.__position.index, vertexBuffer, 0, FLOAT_4);
+									if (shader.__textureCoord != null) context.setVertexBufferAt(shader.__textureCoord.index, vertexBuffer, 4, FLOAT_2);
 									var indexBuffer = blankBitmapData.getIndexBuffer(context);
 
 									if (depth_result) context.drawTriangles(indexBuffer);
@@ -1980,8 +2002,6 @@ class Context3DGraphics
 								var indices = c.indices;
 								var uvtData = c.uvtData;
 								var culling = c.culling;
-
-								currentZ = c.zIndex;
 
 								renderDrawTriangles(vertices.length, indices != null ? indices.length : 0, uvtData != null ? uvtData.length : 0, culling);
 
@@ -2025,9 +2045,16 @@ class Context3DGraphics
 				}
 
 				renderer.clearDepthBuffer();
-				render_pass(true);
+				renderer.setGLDepthTest(true, Context3DCompareMode.LESS);
+
+				var state = renderer.__context3D.__state;
+				var hasDepth = state.renderToTexture != null ? state.renderToTextureDepthStencil : state.backBufferEnableDepthAndStencil;
+				if (renderer.__defaultRenderTarget == null) hasDepth = true;
+
+				if (hasDepth) render_pass(true);
 				render_pass(false);
 
+				renderer.setGLDepthTest(true, Context3DCompareMode.ALWAYS);
 				renderer.setGLBlend(true);
 
 				releaseDrawCommandBuffer(reversedCommands);
