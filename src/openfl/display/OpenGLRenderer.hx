@@ -92,6 +92,7 @@ class OpenGLRenderer extends DisplayObjectRenderer
 	@:noCompletion private var __currentGraphicsShader:Shader;
 	@:noCompletion private var __currentRenderTarget:BitmapData;
 	@:noCompletion private var __currentShader:Shader;
+	@:noCompletion private var __currentShaderIsDepthPass:Bool;
 	@:noCompletion private var __currentShaderBuffer:ShaderBuffer;
 	@:noCompletion private var __defaultDisplayShader:DisplayObjectShader;
 	@:noCompletion private var __defaultGraphicsShader:GraphicsShader;
@@ -467,7 +468,7 @@ class OpenGLRenderer extends DisplayObjectRenderer
 	{
 		__currentShaderBuffer = null;
 
-		if (__currentShader == shader) return;
+		if (__currentShader == shader && __currentShaderIsDepthPass == isDepthPass) return;
 
 		if (__currentShader != null)
 		{
@@ -478,6 +479,7 @@ class OpenGLRenderer extends DisplayObjectRenderer
 		if (shader == null)
 		{
 			__currentShader = null;
+			__currentShaderIsDepthPass = isDepthPass;
 			__context3D.setProgram(null);
 			// __context3D.__flushGLProgram ();
 			return;
@@ -485,7 +487,8 @@ class OpenGLRenderer extends DisplayObjectRenderer
 		else
 		{
 			__currentShader = shader;
-			__currentShader.setShaderDepthMode(isDepthPass);
+			__currentShaderIsDepthPass = isDepthPass;
+			__currentShader.setShaderDepthMode(__currentShaderIsDepthPass);
 
 			__initShader(shader);
 			__context3D.setProgram(shader.current_program);
@@ -655,6 +658,7 @@ class OpenGLRenderer extends DisplayObjectRenderer
 	@:noCompletion private function __copyShader(other:OpenGLRenderer):Void
 	{
 		__currentShader = other.__currentShader;
+		__currentShaderIsDepthPass = other.__currentShaderIsDepthPass;
 		__currentShaderBuffer = other.__currentShaderBuffer;
 		__currentDisplayShader = other.__currentDisplayShader;
 		__currentGraphicsShader = other.__currentGraphicsShader;

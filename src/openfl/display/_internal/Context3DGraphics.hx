@@ -1691,6 +1691,10 @@ class Context3DGraphics
 					graphics.__hardwareDirty = false;
 				}
 
+				var state = renderer.__context3D.__state;
+				var hasDepth = state.renderToTexture != null ? state.renderToTextureDepthStencil : state.backBufferEnableDepthAndStencil;
+				if (renderer.__defaultRenderTarget == null) hasDepth = true;
+
 				inline function render_pass(enableDepthPass:Bool)
 				{
 					depthPass = enableDepthPass;
@@ -1717,14 +1721,18 @@ class Context3DGraphics
 					smooth = false;
 					fill = null;
 
+					var mode:Context3DCompareMode = depthPass ? Context3DCompareMode.LESS : Context3DCompareMode.LESS_EQUAL;
+
 					if (depthPass)
 					{
-						renderer.setGLBlend(false);
+						context.setColorMask(false, false, false, false);
 					}
 					else
 					{
-						renderer.setGLBlend(true);
+						context.setColorMask(true, true, true, true);
 					}
+
+					renderer.setGLDepthTest(depthPass, mode);
 
 					for (type in passCommands.types)
 					{
@@ -1927,73 +1935,7 @@ class Context3DGraphics
 								flushBitmapLinePath();
 								var c = data.readDrawRect();
 
-								if (bitmap != null)
-								{
-									renderDrawTriangles(8, 6, 0, NONE);
-								}
-								else if (fill != null)
-								{
-									var x = c.x;
-									var y = c.y;
-									var width = c.width;
-									var height = c.height;
-
-									if (hasScale9Grid)
-									{
-										var scaledLeft = toScale9Position(c.x, scale9Grid.x, scale9Grid.width, bounds.width, graphics.__owner.scaleX);
-										var scaledTop = toScale9Position(c.y, scale9Grid.y, scale9Grid.height, bounds.height, graphics.__owner.scaleY);
-										var scaledRight = toScale9Position(c.x + c.width, scale9Grid.x, scale9Grid.width, bounds.width,
-											graphics.__owner.scaleX);
-										var scaledBottom = toScale9Position(c.y + c.height, scale9Grid.y, scale9Grid.height, bounds.height,
-											graphics.__owner.scaleY);
-
-										x = scaledLeft / graphics.__owner.scaleX;
-										y = scaledTop / graphics.__owner.scaleY;
-										width = (scaledRight - scaledLeft) / graphics.__owner.scaleX;
-										height = (scaledBottom - scaledTop) / graphics.__owner.scaleY;
-									}
-
-									matrix.identity();
-									matrix.scale(width, height);
-									matrix.tx = x;
-									matrix.ty = y;
-									matrix.concat(graphics.__owner.__renderTransform);
-
-									var shader = maskRender ? renderer.__maskShader : renderer.__initGraphicsShader(null);
-									renderer.setShader(shader, depthPass);
-									depth_result = setup_depth_stuff();
-									renderer.applyMatrix(renderer.__getMatrix(matrix, AUTO));
-									renderer.applyBitmapData(blankBitmapData, true, repeat);
-									var color:ARGB = (fill : ARGB);
-									tempColorTransform.__identity();
-									var worldColorTransform = graphics.__owner.__worldColorTransform;
-									tempColorTransform.redMultiplier = worldColorTransform.redMultiplier;
-									tempColorTransform.greenMultiplier = worldColorTransform.greenMultiplier;
-									tempColorTransform.blueMultiplier = worldColorTransform.blueMultiplier;
-									tempColorTransform.alphaMultiplier = worldColorTransform.alphaMultiplier;
-									tempColorTransform.redOffset = color.r * worldColorTransform.redMultiplier + worldColorTransform.redOffset;
-									tempColorTransform.greenOffset = color.g * worldColorTransform.greenMultiplier + worldColorTransform.greenOffset;
-									tempColorTransform.blueOffset = color.b * worldColorTransform.blueMultiplier + worldColorTransform.blueOffset;
-									tempColorTransform.alphaOffset = color.a * worldColorTransform.alphaMultiplier + worldColorTransform.alphaOffset;
-									renderer.applyAlpha((color.a / 0xFF) * graphics.__owner.__worldAlpha);
-									renderer.applyColorTransform(tempColorTransform);
-									renderer.updateShader();
-
-									var vertexBuffer = blankBitmapData.getVertexBuffer(context);
-									if (shader.__position != null) context.setVertexBufferAt(shader.__position.index, vertexBuffer, 0, FLOAT_4);
-									if (shader.__textureCoord != null) context.setVertexBufferAt(shader.__textureCoord.index, vertexBuffer, 4, FLOAT_2);
-									var indexBuffer = blankBitmapData.getIndexBuffer(context);
-
-									if (depth_result) context.drawTriangles(indexBuffer);
-
-									shaderBufferOffset += 4;
-
-									#if gl_stats
-									Context3DStats.incrementDrawCall(DrawCallContext.STAGE);
-									#end
-
-									renderer.__clearShader();
-								}
+								renderDrawTriangles(8, 6, 0, NONE);
 
 							case DRAW_TRIANGLES:
 								flushBitmapLinePath();
@@ -2045,17 +1987,11 @@ class Context3DGraphics
 				}
 
 				renderer.clearDepthBuffer();
-				renderer.setGLDepthTest(true, Context3DCompareMode.LESS);
-
-				var state = renderer.__context3D.__state;
-				var hasDepth = state.renderToTexture != null ? state.renderToTextureDepthStencil : state.backBufferEnableDepthAndStencil;
-				if (renderer.__defaultRenderTarget == null) hasDepth = true;
 
 				if (hasDepth) render_pass(true);
 				render_pass(false);
 
 				renderer.setGLDepthTest(true, Context3DCompareMode.ALWAYS);
-				renderer.setGLBlend(true);
 
 				releaseDrawCommandBuffer(reversedCommands);
 				releaseDrawCommandBuffer(forwardCommands);

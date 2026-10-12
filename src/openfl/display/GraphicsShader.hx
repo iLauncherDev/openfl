@@ -51,7 +51,7 @@ class GraphicsShader extends Shader
 			#define DEPTH_ALPHA_CHECK(alpha) 															\\
 				do																						\\
 				{																						\\
-					if (openfl_IsDepthPass && (1.0 - (alpha)) >= ALPHA_EPSILON) discard;				\\
+					if (openfl_IsDepthPass && !((alpha) > 0.0)) discard;								\\
 				} while (false)
 		#endif
 
