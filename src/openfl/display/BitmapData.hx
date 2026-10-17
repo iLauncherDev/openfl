@@ -1,7 +1,9 @@
 package openfl.display;
 
+import haxe.io.UInt8Array;
 import lime._internal.graphics.ImageCanvasUtil;
 import lime.app.Application;
+import lime.graphics.PixelFormat;
 import lime.graphics.Image;
 import lime.graphics.ImageBuffer;
 import lime.graphics.ImageChannel;
@@ -25,6 +27,7 @@ import openfl.display3D.Context3DClearMask;
 import openfl.display3D.Context3DTextureFormat;
 import openfl.display3D.IndexBuffer3D;
 import openfl.display3D.VertexBuffer3D;
+import openfl.display3D.textures.RectangleTexture;
 import openfl.display3D.textures.TextureBase;
 import openfl.errors.Error;
 import openfl.filters.BitmapFilter;
@@ -199,6 +202,9 @@ class BitmapData implements IBitmapDrawable
 	@:noCompletion private var __scrollRect:Rectangle;
 	@:noCompletion private var __stencilBuffer:GLRenderbuffer;
 	@:noCompletion private var __surface:CairoSurface;
+	@:noCompletion private var __alphaBuffer:UInt8Array;
+	@:noCompletion private var __alphaTexture:RectangleTexture;
+	@:noCompletion private var __alphaBitmapData:BitmapData;
 	@:noCompletion private var __texture:TextureBase;
 	@:noCompletion private var __textureContext:RenderContext;
 	@:noCompletion private var __textureHeight:Int;
@@ -745,6 +751,18 @@ class BitmapData implements IBitmapDrawable
 		if (__texture != null && !__textureShared)
 		{
 			__texture.dispose();
+		}
+
+		if (__alphaTexture != null)
+		{
+			if (__alphaBitmapData != null)
+			{
+				__alphaBitmapData.dispose();
+				__alphaBitmapData = null;
+			}
+
+			__alphaTexture.dispose();
+			__alphaTexture = null;
 		}
 
 		__texture = null;
@@ -2193,6 +2211,33 @@ class BitmapData implements IBitmapDrawable
 
 			__texture.__uploadFromImage(textureImage);
 
+			if (image.type != null)
+			{
+				if (__alphaTexture == null || __alphaBitmapData == null)
+				{
+					__alphaTexture = context.createRectangleTexture(width, height, R, false);
+					__alphaBitmapData = BitmapData.fromTexture(__alphaTexture);
+				}
+
+				if (__alphaBuffer == null
+					|| (__alphaTexture != null && (__alphaTexture.__width != width || __alphaTexture.__height != height)))
+				{
+					__alphaBuffer = new UInt8Array(width * height);
+				}
+
+				var alphaData = __alphaBuffer;
+				for (y in 0...height)
+				{
+					var y_offset:Int = y * width;
+					for (x in 0...width)
+						alphaData[y_offset + x] = image.getPixel32(x, y, PixelFormat.BGRA32) & 0xFF;
+				}
+
+				__alphaTexture.__width = width;
+				__alphaTexture.__height = height;
+				__alphaTexture.uploadFromTypedArray(alphaData);
+			}
+
 			__textureVersion = image.version;
 
 			__textureWidth = textureImage.buffer.width;
@@ -2206,6 +2251,21 @@ class BitmapData implements IBitmapDrawable
 		}
 
 		return __texture;
+	}
+
+	/**
+		Creates a new single-channel texture containing this bitmap's alpha values.
+		The source BitmapData must be readable. The returned texture uses the red
+		channel, so sample `.r` in a shader. Returns a hardware-only BitmapData that
+		can be assigned to a Shader input. It is updated with this bitmap and disposed
+		when this BitmapData is disposed.
+	**/
+	public function getAlphaTexture(context:Context3D):BitmapData
+	{
+		if (!__isValid || context == null || width <= 0 || height <= 0) return null;
+
+		getTexture(context);
+		return __alphaBitmapData;
 	}
 
 	/**

@@ -272,6 +272,7 @@ class Shader
 	@:noCompletion private var __depthPass:ShaderParameter<Bool>;
 	@:noCompletion private var __alpha:ShaderParameter<Float>;
 	@:noCompletion private var __bitmap:ShaderInput<BitmapData>;
+	@:noCompletion private var __bitmapAlpha:ShaderInput<BitmapData>;
 	@:noCompletion private var __blendMode:ShaderParameter<Int>;
 	@:noCompletion private var __blendBitmap:ShaderInput<BitmapData>;
 	@:noCompletion private var __blendBitmapTransform:ShaderParameter<Float>;
@@ -909,6 +910,8 @@ class Shader
 						__texture = input;
 					case "bitmap":
 						__bitmap = input;
+					case "bitmapAlpha":
+						__bitmapAlpha = input;
 					case "openfl_BlendBitmap":
 						__blendBitmap = input;
 					case "openfl_BlendBitmapMerge":
@@ -1140,6 +1143,8 @@ class Shader
 			inputWrap = shaderBuffer.inputWrap[i];
 
 			if (inputData == null && (input == __blendBitmap || input == __blendBitmapMerge)) inputData = input.input;
+
+			if (current_program == program_depth && input == __bitmap) inputData = inputData?.getAlphaTexture(__context);
 
 			if (inputData != null)
 			{

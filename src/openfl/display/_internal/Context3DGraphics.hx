@@ -1505,6 +1505,7 @@ class Context3DGraphics
 
 				inline function setup_depth_stuff():Bool
 				{
+					if ((bitmap != null && bitmap?.getAlphaTexture(context) == null) && depthPass) return false;
 					if (!renderer.applyDepthPassCondition(depthPass) && depthPass) return false;
 
 					return true;
@@ -1721,7 +1722,7 @@ class Context3DGraphics
 					smooth = false;
 					fill = null;
 
-					var mode:Context3DCompareMode = depthPass ? Context3DCompareMode.LESS : Context3DCompareMode.LESS_EQUAL;
+					var mode:Context3DCompareMode = depthPass ? Context3DCompareMode.LESS : Context3DCompareMode.LESS;
 
 					if (depthPass)
 					{
@@ -1988,7 +1989,7 @@ class Context3DGraphics
 
 				renderer.clearDepthBuffer();
 
-				if (hasDepth) render_pass(true);
+				// if (hasDepth) render_pass(true);
 				render_pass(false);
 
 				renderer.setGLDepthTest(true, Context3DCompareMode.ALWAYS);

@@ -137,6 +137,7 @@ class OpenGLRenderer extends DisplayObjectRenderer
 		#end
 
 		__gl = gl;
+		__gl.pixelStorei(__gl.UNPACK_ALIGNMENT, 1);
 
 		this.__defaultRenderTarget = defaultRenderTarget;
 		this.__flipped = (__defaultRenderTarget == null);
@@ -322,11 +323,20 @@ class OpenGLRenderer extends DisplayObjectRenderer
 		}
 		else if (__currentShader != null)
 		{
+			var alphaBitmapData:BitmapData = bitmapData?.getAlphaTexture(__context3D);
+
 			if (__currentShader.__bitmap != null)
 			{
-				__currentShader.__bitmap.input = bitmapData;
+				__currentShader.__bitmap.input = __currentShader.current_program == __currentShader.program_depth ? alphaBitmapData : bitmapData;
 				__currentShader.__bitmap.filter = (smooth && __allowSmoothing) ? LINEAR : NEAREST;
 				__currentShader.__bitmap.wrap = repeat ? REPEAT : CLAMP;
+			}
+
+			if (__currentShader.__bitmapAlpha != null)
+			{
+				__currentShader.__bitmapAlpha.input = bitmapData;
+				__currentShader.__bitmapAlpha.filter = (smooth && __allowSmoothing) ? LINEAR : NEAREST;
+				__currentShader.__bitmapAlpha.wrap = repeat ? REPEAT : CLAMP;
 			}
 
 			if (__currentShader.__texture != null)
@@ -488,9 +498,10 @@ class OpenGLRenderer extends DisplayObjectRenderer
 		{
 			__currentShader = shader;
 			__currentShaderIsDepthPass = isDepthPass;
-			__currentShader.setShaderDepthMode(__currentShaderIsDepthPass);
 
 			__initShader(shader);
+			__currentShader.setShaderDepthMode(__currentShaderIsDepthPass);
+
 			__context3D.setProgram(shader.current_program);
 			__context3D.__flushGLProgram();
 			// __context3D.__flushGLTextures ();
@@ -637,6 +648,7 @@ class OpenGLRenderer extends DisplayObjectRenderer
 			if (__currentShaderBuffer == null)
 			{
 				if (__currentShader.__bitmap != null) __currentShader.__bitmap.input = null;
+				if (__currentShader.__bitmapAlpha != null) __currentShader.__bitmapAlpha.input = null;
 			}
 			else
 			{

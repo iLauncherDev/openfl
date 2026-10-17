@@ -46,12 +46,14 @@ class GraphicsShader extends Shader
 		#if !defined DEPTH_PASS_SUPPORTED || !defined IS_DEPTH_PASS
 			#define DEPTH_ALPHA_CHECK(alpha)
 		#else
+			#define DEPTH_PASS
+
 			uniform bool openfl_IsDepthPass;
 
 			#define DEPTH_ALPHA_CHECK(alpha) 															\\
 				do																						\\
 				{																						\\
-					if (openfl_IsDepthPass && !((alpha) > 0.0)) discard;								\\
+					if (openfl_IsDepthPass && (alpha) < 1.0) discard;									\\
 				} while (false)
 		#endif
 
@@ -59,6 +61,7 @@ class GraphicsShader extends Shader
 		uniform vec2 openfl_TextureSize;
 		uniform bool sampleAttachment;
 		uniform sampler2D bitmap;
+		uniform sampler2D bitmapAlpha;
 		uniform sampler2D openfl_BlendBitmap;
 		uniform vec4 openfl_BlendBitmapTransform;
 		uniform sampler2D openfl_BlendBitmapMerge;
@@ -414,14 +417,34 @@ class GraphicsShader extends Shader
 
 			return openfl_applyBlend (color * openfl_Alphav);
 
+		}
+
+		float openfl_texture2D_alpha(sampler2D bitmap, vec2 coord) {
+
+			float alpha = texture2D (bitmap, coord).r;
+
+			if (openfl_HasColorTransform) {
+				alpha = clamp (openfl_ColorOffsetv.a + alpha, 0.0, 1.0);
+			}
+
+			return alpha * openfl_Alphav;
+
 		}", true)
 	@:glFragmentBody("
+		#ifdef DEPTH_PASS
+			float alpha = openfl_texture2D_alpha(bitmapAlpha, openfl_TextureCoordv);
+			DEPTH_ALPHA_CHECK(alpha);
+
+			return;
+		#endif
+
 		vec4 color = openfl_texture2D (bitmap, openfl_TextureCoordv);
-		DEPTH_ALPHA_CHECK(color.a);
 
 		gl_FragColor = color;
 	", true)
-	@:glFragmentSource("#pragma header
+	@:glFragmentSource("
+		// #define DEPTH_PASS_SUPPORTED
+		#pragma header
 
 		void main(void) {
 

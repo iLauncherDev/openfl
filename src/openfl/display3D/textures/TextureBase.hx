@@ -1,5 +1,7 @@
 package openfl.display3D.textures;
 
+import openfl.display3D.Context3D;
+import lime.graphics.OpenGLRenderContext;
 import lime._internal.graphics.ImageCanvasUtil;
 import lime.graphics.Image;
 import lime.graphics.RenderContext;
@@ -45,6 +47,20 @@ class TextureBase extends EventDispatcher
 	@:noCompletion private var __textureContext:RenderContext;
 	@:noCompletion private var __textureID:GLTexture;
 	@:noCompletion private var __textureTarget:Int;
+
+	@:noCompletion private function is_opengl_3_plus(context:RenderContext):Bool
+	{
+		if (context.type == OPENGL)
+		{
+			return Std.parseFloat(context.version) >= 3;
+		}
+		else if (context.type == OPENGLES || context.type == WEBGL)
+		{
+			return context.gles3 != null || context.webgl2 != null;
+		}
+
+		return false;
+	}
 
 	@:noCompletion private function new(context:Context3D, ?format:Context3DTextureFormat)
 	{
@@ -92,8 +108,20 @@ class TextureBase extends EventDispatcher
 					__internalFormat = gl.RGBA;
 					__format = gl.RGBA;
 				case R:
-					__internalFormat = gl.R8;
-					__internalFormat = gl.RED;
+					if (is_opengl_3_plus(context.__context))
+					{
+						__internalFormat = gl.R8;
+						__format = gl.RED;
+
+						trace("its OpenGL +3.0");
+					}
+					else
+					{
+						__internalFormat = 0x8040; // gl.LUMINANCE8
+						__format = gl.LUMINANCE;
+
+						trace("its OpenGL 2.1");
+					}
 			}
 		}
 	}
