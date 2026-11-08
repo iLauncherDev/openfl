@@ -1,5 +1,6 @@
 package openfl.display;
 
+import haxe.Int64;
 import haxe.CallStack;
 import haxe.ds.ArraySort;
 import lime.app.Application;
@@ -21,6 +22,7 @@ import openfl.display.Application as OpenFLApplication;
 import openfl.display3D.Context3D;
 import openfl.errors.IllegalOperationError;
 import openfl.events.Event;
+import openfl.events.FrameEvent;
 import openfl.events.EventDispatcher;
 import openfl.events.EventPhase;
 import openfl.events.FocusEvent;
@@ -812,6 +814,8 @@ class Stage extends DisplayObjectContainer implements IModule
 	@:noCompletion private var __contentsScaleFactor:Float;
 	@:noCompletion private var __currentTabOrderIndex:Int;
 	@:noCompletion private var __deltaTime:Float;
+	@:noCompletion private var __oldFrameTimestamp:Int64;
+	@:noCompletion private var __currentFrameTimestamp:Int64;
 	@:noCompletion private var __dirty:Bool;
 	@:noCompletion private var __displayMatrix:Matrix;
 	@:noCompletion private var __displayRect:Rectangle;
@@ -2091,15 +2095,18 @@ class Stage extends DisplayObjectContainer implements IModule
 		Context3DStats.resetDrawCalls();
 		#end
 
-		var event:Event = null;
+		var frameEvent = null;
+		var event = null;
 
 		#if openfl_pool_events
-		event = Event.__pool.get();
-		event.type = Event.ENTER_FRAME;
+		frameEvent = FrameEvent.__pool.get();
+		frameEvent.deltaTime = __deltaTime;
+		frameEvent.oldFrameTimestamp = __oldFrameTimestamp;
+		frameEvent.currentFrameTimestamp = __currentFrameTimestamp;
 
-		__broadcastEvent(event);
+		__broadcastEvent(frameEvent);
 
-		Event.__pool.release(event);
+		FrameEvent.__pool.release(frameEvent);
 		event = Event.__pool.get();
 		event.type = Event.FRAME_CONSTRUCTED;
 
@@ -2113,7 +2120,7 @@ class Stage extends DisplayObjectContainer implements IModule
 
 		Event.__pool.release(event);
 		#else
-		__broadcastEvent(new Event(Event.ENTER_FRAME));
+		__broadcastEvent(new FrameEvent(__deltaTime, __oldFrameTimestamp, __currentFrameTimestamp));
 		__broadcastEvent(new Event(Event.FRAME_CONSTRUCTED));
 		__broadcastEvent(new Event(Event.EXIT_FRAME));
 		#end
@@ -2243,9 +2250,11 @@ class Stage extends DisplayObjectContainer implements IModule
 		__onTouch(TouchEvent.TOUCH_BEGIN, touch, __primaryTouch == touch);
 	}
 
-	@:noCompletion private function __onLimeUpdate(deltaTime:Float):Void
+	@:noCompletion private function __onLimeUpdate(deltaTime:Float, oldFrameTimestamp:Int64, currentFrameTimestamp:Int64):Void
 	{
 		__deltaTime = deltaTime;
+		__oldFrameTimestamp = oldFrameTimestamp;
+		__currentFrameTimestamp = currentFrameTimestamp;
 
 		__dispatchPendingMouseEvent();
 	}
